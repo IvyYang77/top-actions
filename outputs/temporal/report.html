@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Top 10 Actions Predicting User Engagement</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --border: rgba(11,11,11,0.10);
+    --series-blue: #2a78d6;
+    --series-blue-light: #cde2fb;
+    --good: #0ca30c;
+    --good-bg: #e6f6e6;
+    --critical: #d03b3b;
+    --critical-bg: #fbeaea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--text-secondary); font-size: 15px; margin: 0 0 32px; }
+  h2 {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h2:first-of-type { margin-top: 0; }
+
+  /* KPI tiles */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .kpi {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .kpi-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--series-blue);
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Objective definition rows */
+  .objective { display: flex; flex-direction: column; gap: 10px; }
+  .obj-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 16px;
+    padding: 12px 14px;
+    background: var(--surface-1);
+    border-left: 3px solid var(--series-blue);
+    border-radius: 0 8px 8px 0;
+  }
+  .obj-key { font-weight: 700; font-size: 13px; color: var(--series-blue); }
+  .obj-val { font-size: 14px; color: var(--text-primary); }
+
+  /* Bar chart */
+  .chart { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 24px; }
+  .bar-row { display: grid; grid-template-columns: 230px 1fr 70px; align-items: center; gap: 10px; }
+  .bar-label { font-size: 13px; text-align: right; color: var(--text-primary); }
+  .bar-track { background: var(--border); border-radius: 4px; height: 20px; position: relative; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .bar-fill.good { background: var(--good); }
+  .bar-fill.critical { background: var(--critical); }
+  .bar-value { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  }
+  .badge.good { color: var(--good); background: var(--good-bg); }
+  .badge.critical { color: var(--critical); background: var(--critical-bg); }
+
+  .legend { display: flex; gap: 20px; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 14px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+       color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  td:first-child, th:first-child { font-variant-numeric: normal; padding-left: 0; }
+
+  figure { margin: 24px 0; }
+  figure img { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+  figcaption { font-size: 12px; color: var(--text-muted); margin-top: 8px; text-align: center; }
+
+  .findings { display: flex; flex-direction: column; gap: 14px; }
+  .finding {
+    background: var(--surface-1);
+    border-left: 3px solid var(--series-blue);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 16px;
+  }
+  .finding.negative { border-left-color: var(--critical); }
+  .finding-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .finding-body { font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; }
+
+  code, pre {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: #1a1a19;
+    color: #e1e0d9;
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Top 10 Actions Predicting User Engagement</h1>
+  <p class="subtitle">Which recent 30-day behaviors most strongly predict a user will be engaged in the next 30 days</p>
+
+  <h2>Population &amp; Model</h2>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-value">5,415</div><div class="kpi-label">Modeled users</div></div>
+    <div class="kpi"><div class="kpi-value">21.0%</div><div class="kpi-label">Engaged in next 30 days</div></div>
+    <div class="kpi"><div class="kpi-value">0.942</div><div class="kpi-label">Out-of-fold ROC-AUC</div></div>
+    <div class="kpi"><div class="kpi-value">0.851</div><div class="kpi-label">Out-of-fold PR-AUC</div></div>
+  </div>
+
+  <h2>Objective</h2>
+  <div class="objective">
+    <div class="obj-row"><div class="obj-key">Question</div><div class="obj-val">Which recent 30-day behaviors most strongly predict that a user will be engaged in the next 30 days?</div></div>
+    <div class="obj-row"><div class="obj-key">Input</div><div class="obj-val">Each user's own most recent 30 days of behavior (a per-user trailing usage window)</div></div>
+    <div class="obj-row"><div class="obj-key">Label</div><div class="obj-val">Whether the user becomes engaged in the following 30 days — at least 7 distinct Power User / Elite Power User days. Feature and outcome windows are non-overlapping.</div></div>
+    <div class="obj-row"><div class="obj-key">Model</div><div class="obj-val">XGBoost, stratified 5-fold cross-validation, out-of-fold predictions and SHAP values throughout</div></div>
+    <div class="obj-row"><div class="obj-key">Output</div><div class="obj-val">SHAP values, ranking the top 10 behaviors by predictive strength and direction</div></div>
+  </div>
+
+  <h2>Top 10 Predictive Features</h2>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--good)"></span>Positive — more usage, higher engagement odds</span>
+    <span><span class="swatch" style="background:var(--critical)"></span>Negative — more usage, lower engagement odds</span>
+  </div>
+  <table>
+    <thead><tr><th>Rank</th><th>Feature</th><th>Mean |SHAP|</th><th>Direction</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Vincent RA – Recent Conversation Opened</td><td>1.072</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>2</td><td>Text Editor Opened</td><td>0.597</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>3</td><td>Vincent RA – Legal Authorities Tab Viewed</td><td>0.492</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>4</td><td>Text Editor Updated</td><td>0.430</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>5</td><td>Workflow: Others</td><td>0.421</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>6</td><td>Vincent RA – Document Upload</td><td>0.376</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>7</td><td>Matter – AI Action Viewed</td><td>0.278</td><td><span class="badge critical">↓ Negative</span></td></tr>
+      <tr><td>8</td><td>Work – Work Opened</td><td>0.235</td><td><span class="badge critical">↓ Negative</span></td></tr>
+      <tr><td>9</td><td>Vincent RA – New Conversation Started</td><td>0.213</td><td><span class="badge good">↑ Positive</span></td></tr>
+      <tr><td>10</td><td>Matter – AI Action Generated</td><td>0.157</td><td><span class="badge good">↑ Positive</span></td></tr>
+    </tbody>
+  </table>
+
+  <figure>
+    <img src="shap_summary_beeswarm.png" alt="SHAP summary beeswarm">
+    <figcaption>SHAP summary beeswarm — per-user attribution and value distribution for the top 10 features</figcaption>
+  </figure>
+
+  <h2>Findings</h2>
+  <div class="findings">
+    <div class="finding">
+      <div class="finding-title">1. Returning to a conversation is ~5x more predictive than starting a new one</div>
+      <div class="finding-body">Recent Conversation Opened (1.072) substantially outweighs New Conversation Started (0.213). Sustained, habitual use is a stronger signal than initial trial.</div>
+    </div>
+    <div class="finding">
+      <div class="finding-title">2. Legal Pad drafting activity is a top-tier signal</div>
+      <div class="finding-body">Text Editor Opened (0.597) and Text Editor Updated (0.430) together approach the top feature's weight, indicating active production work drives engagement.</div>
+    </div>
+    <div class="finding">
+      <div class="finding-title">3. "Workflow: Others" is highly predictive but unattributed</div>
+      <div class="finding-body">Ranks 5th (0.421) while every individually named workflow type ranks 23rd–44th. Further investigation of this category's composition is recommended before treating it as actionable.</div>
+    </div>
+    <div class="finding negative">
+      <div class="finding-title">4. Passive interactions are negative predictors</div>
+      <div class="finding-body">Work – Work Opened (0.235, negative direction) and Matter – AI Action Viewed (0.278, negative direction) are both low-effort, non-deliberate actions. Their negative direction, contrasted with the positive direction of the specific, effortful actions above, indicates that depth of deliberate usage predicts engagement — breadth of passive browsing does not.</div>
+    </div>
+  </div>
+
+  <h2>Reproducibility</h2>
+  <pre>cd top_actions
+python pull_data.py
+python power_user_temporal_analysis.py</pre>
+  <p style="font-size:13px;color:var(--text-secondary)">Full ranking: <code>sub_feature_importance.csv</code>. Per-user SHAP values: <code>per_user_shap.csv</code>.</p>
+
+</div>
+</body>
+</html>

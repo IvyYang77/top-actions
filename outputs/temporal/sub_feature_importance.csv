@@ -1,0 +1,48 @@
+sub_feature,mean_abs_shap,gain,direction
+Vincent RA - Recent Conversation Opened,1.072,75.5,1.0
+Text Editor Opened,0.597,21.9,1.0
+Vincent RA - Legal Authorities Tab Viewed,0.492,11.8,1.0
+Text Editor Updated,0.43,16.9,1.0
+Workflow: others,0.421,11.1,1.0
+Vincent RA - Document upload,0.376,8.1,1.0
+Matter - AI Action Viewed,0.278,6.0,-1.0
+Work - Work Opened,0.235,5.8,-1.0
+Vincent RA - New Conversation Started,0.213,18.9,1.0
+Matter - AI Action Generated,0.157,5.8,1.0
+Manage - Recent Work Conversation Opened,0.106,6.5,1.0
+Work - Draft Opened,0.102,5.8,1.0
+Vincent RA - Output Saved,0.1,6.0,1.0
+Vincent RA - Query Classification,0.099,7.8,1.0
+Matter - AI Action Clicked,0.081,7.5,1.0
+Task: free_form_message,0.079,7.3,1.0
+Vincent RA - Matter Selected,0.072,4.9,1.0
+Task: memo,0.071,8.0,1.0
+Vincent RA - Task submission,0.065,7.0,1.0
+Vincent RA - Jurisdiction Selected,0.058,5.8,-1.0
+Vincent RA - Legal Authorities Tab Closed,0.055,5.9,1.0
+Manage - Document Analyzed in Vincent,0.05,5.9,1.0
+Workflow: default,0.035,4.9,1.0
+Vincent RA - Document Downloaded,0.032,4.8,-1.0
+Vincent RA - Output Copied,0.029,4.5,-1.0
+Task: discuss,0.028,5.0,-1.0
+Vincent RA - Reference Clicked,0.028,5.0,-1.0
+Task: others,0.013,6.0,1.0
+Task: draft_questionnaire,0.011,5.0,1.0
+Workflow: research,0.006,4.8,-1.0
+Workflow: analyze_complaint,0.004,3.5,-1.0
+Task: contract_inconsistencies_overlap,0.004,3.8,1.0
+Workflow: analyze_contract,0.002,3.5,1.0
+Vincent RA - Document processed complete,0.002,2.5,1.0
+Task: extract_claims,0.002,2.8,-1.0
+Task: support_proposition,0.002,4.9,1.0
+Task: extract_facts,0.001,5.3,-1.0
+Task: propose_defenses,0.001,5.6,1.0
+Task: contract_risk_mitigations,0.001,3.5,1.0
+Matter - AI Action Dismissed,0.001,0.7,1.0
+Workflow: tabular_review,0.001,3.0,1.0
+Workflow: build_argument_with_facts,0.0,1.7,1.0
+Workflow: build_argument,0.0,0.0,
+Workflow: analyze_judicial_proceedings,0.0,0.0,
+Vincent RA - Tables Empty Table Selected,0.0,0.0,
+Vincent RA - Tables Auto Generate Selected,0.0,0.0,
+Vincent RA - Tables Template Selected,0.0,0.0,
