@@ -25,8 +25,9 @@ in one arbitrarily-chosen month:
                       Every user can appear in MULTIPLE snapshot rows (once
                       per eligible month).
   * Feature window : [T-29, T] per snapshot -- recent 30-day usage AS OF T.
-  * Target window  : (T, T+WINDOW_DAYS] per snapshot -- the 30 days AFTER T,
-                      a genuine future window, no overlap with features.
+  * Target window  : (T+OUTCOME_BUFFER_DAYS, T+OUTCOME_BUFFER_DAYS+WINDOW_DAYS]
+                      per snapshot. Buffered forward, not directly after T --
+                      see the rolling-window note below on why.
   * Population     : per snapshot, anyone NOT already at Power/Elite and not
                       Inactive at T, with a full feature window available in
                       their tracked history as of that T -- i.e. only users
@@ -42,14 +43,24 @@ in one arbitrarily-chosen month:
                       months). Grouping keeps all of a user's rows in one
                       fold.
 
-OPEN QUESTION (unresolved as of this version): whether user_category_persona
-is computed cumulative-since-day-0 or from a trailing rolling window (e.g.
-90 days) internally. Real sample data examined this session suggested
-cumulative-since-day-0 (no leakage risk), but this hasn't been confirmed
-with whoever owns the scoring pipeline. If it turns out to be a rolling
-window wider than WINDOW_DAYS, every month-to-next-month design here
-(including this one) would need a gap inserted between feature and target
-windows to stay leak-safe.
+RESOLVED THIS SESSION: user_category_persona/login_ratio is computed from a
+TRAILING ROLLING WINDOW of roughly 90-103 days, not a lifetime cumulative
+average. Confirmed empirically with 3 independent long-tenure users, each
+active only on day 0 of their tracked history and never again -- all three
+hit an exact, sustained 0.00 login_ratio within 90-103 days of that single
+active day, which a lifetime cumulative average could not do for hundreds
+more days (an initial look at a coarser, every-10th-row sample of one user
+had suggested cumulative-since-day-0; a finer daily-resolution look at a
+longer-tenure user, plus these 3 corroborating cases, reversed that).
+Because the rolling lookback (~90-103 days) is wider than WINDOW_DAYS (30),
+a persona reading anywhere in (T, T+30] would look back far enough to fully
+contain the feature window [T-29, T] -- i.e. the label would be computed
+partly from the same activity as the features. OUTCOME_BUFFER_DAYS = 105 (in
+pull_data.py, mirrored here) pushes the target window to T+106..T+135 --
+above the observed max (103), not the low end (90), so it fully clears the
+whole observed range with margin. This costs snapshot months (a valid
+snapshot now needs OUTCOME_BUFFER_DAYS+WINDOW_DAYS of runway after T, not
+just WINDOW_DAYS), not just a widened target window's own dates.
 
 Run:
     python power_user_temporal_analysis.py
@@ -104,9 +115,11 @@ EXCLUDE_TIERS_AT_T = {"Inactive", "Power User", "Elite Power User"}
 # at all.
 EXCLUDE_FEATURES = {"Work - Work Opened (Excludes App Switcher)"}
 # Feature window length AND target (outcome) window length, both WINDOW_DAYS
-# calendar days: features from [T-29, T], label checked in (T, T+WINDOW_DAYS].
-# Must match WINDOW_DAYS and the snapshot list logic in pull_data.py.
+# calendar days: features from [T-29, T], label checked in
+# (T+OUTCOME_BUFFER_DAYS, T+OUTCOME_BUFFER_DAYS+WINDOW_DAYS]. Must match
+# WINDOW_DAYS/OUTCOME_BUFFER_DAYS and the snapshot list logic in pull_data.py.
 WINDOW_DAYS = 30
+OUTCOME_BUFFER_DAYS = 105  # label window T+106..T+135, clears observed 90-103d rolling range with margin
 FEATURE_FILE = DATA_DIR / "feature_usage_early.parquet"
 OUT_DIR = Path(__file__).resolve().parent / "outputs" / "temporal"
 # Cohort filter: analyze only users who JOINED (first persona snapshot) on/after
@@ -156,10 +169,20 @@ def build_window_frame() -> pd.DataFrame:
     """
     ph = pd.read_parquet(
         DATA_DIR / "personas_history.parquet",
-        columns=["user_id", "user_category_persona", "score_date"],
+        columns=["user_id", "user_category_persona", "score_date",
+                 "is_clio_account_test", "is_sfdc_account_test"],
     )
     ph["score_date"] = pd.to_datetime(ph["score_date"], errors="coerce")
     ph = ph.dropna(subset=["score_date"])
+    # Exclude test accounts entirely -- "official usage only, not all raw
+    # rows." A user/account ever flagged test on any snapshot is dropped
+    # from the whole population (not just that one day), since these flags
+    # are account-level, not expected to flip back and forth.
+    test_users = ph.loc[ph["is_clio_account_test"] | ph["is_sfdc_account_test"], "user_id"].unique()
+    n_before = ph["user_id"].nunique()
+    ph = ph.loc[~ph["user_id"].isin(test_users)]
+    print(f"Excluded {len(test_users):,} test-account users "
+          f"({n_before - ph['user_id'].nunique():,} of {n_before:,} total)")
 
     joined = ph.groupby("user_id")["score_date"].min()  # journey start (join date)
     meta = _load_snapshot_metadata()
@@ -181,8 +204,10 @@ def build_window_frame() -> pd.DataFrame:
             .drop_duplicates("user_id")
             .set_index("user_id")["user_category_persona"]
         )
+        outcome_start = t + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
+        outcome_end = outcome_start + pd.Timedelta(days=WINDOW_DAYS - 1)
         power_after_t = (
-            power_days.loc[(power_days["score_date"] > t) & (power_days["score_date"] <= t + pd.Timedelta(days=WINDOW_DAYS))]
+            power_days.loc[(power_days["score_date"] >= outcome_start) & (power_days["score_date"] <= outcome_end)]
             .groupby("user_id")["score_date"].nunique()
         )
 
@@ -257,12 +282,13 @@ def main() -> None:
     labels = frame.loc[frame["at_risk"], ["user_id", "snapshot_t", "engaged"]]
     data = labels.merge(matrix, on=["user_id", "snapshot_t"], how="inner")
 
-    print(f"feature window = [T-29, T] | target window = (T, T+{WINDOW_DAYS}] | population = users "
+    print(f"feature window = [T-29, T] | target window = (T+{OUTCOME_BUFFER_DAYS}, T+{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}] "
+          f"(buffered past persona's own ~90-103d rolling lookback) | population = users "
           f"NOT YET at Power/Elite at T (New/Casual/Core only) | "
           f"engaged = >= {MIN_POWER_DAYS} power-tier days within the target window (genuine new conversion)")
     print(f"modeled (user, snapshot) rows: {len(data):,} | distinct users: {data['user_id'].nunique():,} "
           f"| sub_features: {data.shape[1] - 3}")
-    print(f"engaged in the following {WINDOW_DAYS}d: {int(data['engaged'].sum()):,} ({data['engaged'].mean():.1%})")
+    print(f"engaged in the buffered {WINDOW_DAYS}d target window: {int(data['engaged'].sum()):,} ({data['engaged'].mean():.1%})")
 
     feature_cols = [
         c for c in data.columns
@@ -353,7 +379,7 @@ def main() -> None:
     ax.set_title("Precision-Recall curve (5-fold group out-of-fold)")
     ax.legend(fontsize=8, loc="upper right")
 
-    fig.suptitle(f"Model performance -- recent usage (last {WINDOW_DAYS} days) -> engaged in next {WINDOW_DAYS} days")
+    fig.suptitle(f"Model performance -- recent usage (last {WINDOW_DAYS}d) -> engaged {OUTCOME_BUFFER_DAYS}-{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}d later")
     fig.tight_layout()
     fig.savefig(OUT_DIR / "model_performance_curves.png", dpi=160, bbox_inches="tight")
     plt.close(fig)
@@ -382,7 +408,7 @@ def main() -> None:
     print(imp[["sub_feature", "mean_abs_shap", "direction"]].head(5).to_string(index=False))
 
     # ---- Plots -------------------------------------------------------------#
-    title = f"Recent usage (last {WINDOW_DAYS} days) -> engaged in next {WINDOW_DAYS} days"
+    title = f"Recent usage (last {WINDOW_DAYS}d) -> engaged {OUTCOME_BUFFER_DAYS}-{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}d later"
     shap.summary_plot(oof_shap, X, max_display=10, show=False)
     plt.title(title)
     plt.tight_layout()

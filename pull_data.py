@@ -32,6 +32,19 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # them to metadata.json, which power_user_temporal_analysis.py reads rather
 # than recomputing, so the two scripts can't silently disagree.
 WINDOW_DAYS = 30
+# Empirically confirmed this session (3 independent long-tenure users, each
+# active on day 0 then never again): user_category_persona/login_ratio is
+# computed from a TRAILING ROLLING WINDOW of roughly 90-103 days, not a
+# lifetime cumulative average -- all three hit an exact, sustained 0.00
+# within 90-103 days of their one active day, which a lifetime average could
+# not do for hundreds more days. That means a persona reading on any day
+# within (T, T+30] looks back far enough to fully contain the feature window
+# [T-29, T], so the old label leaked. OUTCOME_BUFFER_DAYS pushes the label's
+# read window to start at T+106 (label window T+106..T+135) -- set above the
+# observed max (103), not at the low end (90), so it fully clears the whole
+# observed range with margin rather than leaving a residual leakage sliver
+# for users whose rolling window runs closer to 103d.
+OUTCOME_BUFFER_DAYS = 105
 OUT_FILE = DATA_DIR / "feature_usage_early.parquet"
 META_FILE = DATA_DIR / "temporal_metadata.json"
 
@@ -61,9 +74,11 @@ print(f"data_max_date (min of both):          {data_max_date.date()}")
 month_ends = pd.date_range(persona_min_date, data_max_date, freq="ME")
 snapshots = pd.DataFrame({"T": month_ends})
 snapshots["window_start"] = snapshots["T"] - pd.Timedelta(days=WINDOW_DAYS - 1)
-snapshots["outcome_end"] = snapshots["T"] + pd.Timedelta(days=WINDOW_DAYS)
+snapshots["outcome_start"] = snapshots["T"] + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
+snapshots["outcome_end"] = snapshots["outcome_start"] + pd.Timedelta(days=WINDOW_DAYS - 1)
 snapshots = snapshots.loc[snapshots["outcome_end"] <= data_max_date].reset_index(drop=True)
-print(f"Valid monthly snapshots ({len(snapshots)}): {[t.date().isoformat() for t in snapshots['T']]}")
+print(f"Valid monthly snapshots ({len(snapshots)}, outcome buffered +{OUTCOME_BUFFER_DAYS}d to clear "
+      f"persona's own rolling lookback): {[t.date().isoformat() for t in snapshots['T']]}")
 
 metadata = {
     "event_max_date": event_max_date.date().isoformat(),
@@ -71,11 +86,12 @@ metadata = {
     "persona_snapshot_is_stale": bool(persona_max_date < event_max_date),
     "data_max_date": data_max_date.date().isoformat(),
     "window_days": WINDOW_DAYS,
+    "outcome_buffer_days": OUTCOME_BUFFER_DAYS,
     "snapshots": [
         {"T": row.T.date().isoformat(),
          "feature_window_start": row.window_start.date().isoformat(),
          "feature_window_end": row.T.date().isoformat(),
-         "outcome_window_start": (row.T + pd.Timedelta(days=1)).date().isoformat(),
+         "outcome_window_start": row.outcome_start.date().isoformat(),
          "outcome_window_end": row.outcome_end.date().isoformat()}
         for row in snapshots.itertuples()
     ],
@@ -115,6 +131,16 @@ print(f"Pulling all Work/Vincent sub_features, excluding {len(DENYLIST)} known n
       f"and all 'Vincent Agentic - *' features...")
 spark.createDataFrame(pd.DataFrame({"sub_feature": DENYLIST})).createOrReplaceTempView("denied_features")
 
+# --- DAU/SOT filter: only events officially counted as product usage ------
+# Test-account exclusion (in power_user_temporal_analysis.py) answers "is
+# this a real customer?" -- a different question from "is this event
+# actually product usage?" Confirmed real, present-in-our-data need: the
+# prior run's sub_feature_importance.csv contained rows like "Auth
+# Completed" and "Template Builder Error/Abandoned/Opened" -- plausible
+# technical/system events, not user actions, that product IN ('Work',
+# 'Vincent') alone doesn't catch. NOT independently verified: the exact
+# table name below. If wrong, Databricks will fail clearly on this query
+# rather than silently pulling bad data.
 print("Pulling FEATURE-WINDOW sub_feature intensity per monthly snapshot (aggregated server-side)...")
 df = spark.sql("""
     SELECT
@@ -126,10 +152,15 @@ df = spark.sql("""
     FROM models_prod.dbt.fact_product_all_events_by_user_by_day f
     JOIN snapshots s
       ON to_date(f.time_period) BETWEEN to_date(s.window_start) AND to_date(s.T)
+    JOIN models_prod.dbt.int_product_usage_sot_sources sot
+      ON f.product = sot.product
+     AND f.feature = sot.feature
+     AND coalesce(f.sub_feature, '') = coalesce(sot.sub_feature, '')
     LEFT ANTI JOIN denied_features x
       ON f.sub_feature = x.sub_feature
     WHERE f.product IN ('Work', 'Vincent')
       AND f.sub_feature NOT LIKE 'Vincent Agentic%'
+      AND sot.is_dau_mau IS TRUE
     GROUP BY f.clio_user_c, s.T, f.sub_feature
 """).toPandas()
 df.attrs = {}
