@@ -402,6 +402,7 @@ def main() -> None:
     imp["mean_abs_shap"] = imp["mean_abs_shap"].round(3)
     imp["gain"] = imp["gain"].round(1)
     imp.to_csv(OUT_DIR / "sub_feature_importance.csv", index=False)
+    imp.head(5).to_csv(OUT_DIR / "sub_feature_importance_top5.csv", index=False)
 
     print("\nTop 5 stable recent-usage sub_features by mean|SHAP| averaged across snapshots "
           "(5-fold group out-of-fold, predicting engagement 30 days out):")
@@ -409,13 +410,13 @@ def main() -> None:
 
     # ---- Plots -------------------------------------------------------------#
     title = f"Recent usage (last {WINDOW_DAYS}d) -> engaged {OUTCOME_BUFFER_DAYS}-{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}d later"
-    shap.summary_plot(oof_shap, X, max_display=10, show=False)
+    shap.summary_plot(oof_shap, X, max_display=5, show=False)
     plt.title(title)
     plt.tight_layout()
     plt.savefig(OUT_DIR / "shap_summary_beeswarm.png", dpi=160, bbox_inches="tight")
     plt.close()
 
-    shap.summary_plot(oof_shap, X, plot_type="bar", max_display=10, show=False)
+    shap.summary_plot(oof_shap, X, plot_type="bar", max_display=5, show=False)
     plt.title(title)
     plt.tight_layout()
     plt.savefig(OUT_DIR / "shap_importance_bar.png", dpi=160, bbox_inches="tight")
