@@ -1,4 +1,5 @@
 from databricks.connect import DatabricksSession
+import json
 import os
 from pathlib import Path
 import pandas as pd
@@ -8,14 +9,31 @@ import pandas as pd
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# FORWARD-LOOKING design: each user's own landmark day T = last_seen - WINDOW_DAYS,
-# NOT last_seen itself. The feature window is [T-29, T] (their recent 30-day
-# usage as of T); power_user_temporal_analysis.py then checks the label in the
-# 30 days AFTER T (T, T+30] = (T, last_seen] -- a real future window with no
-# overlap with these features. Must match WINDOW_DAYS in
-# power_user_temporal_analysis.py.
+# MULTIPLE FIXED, SHARED prediction dates (monthly snapshots) -- answers
+# "which recent behaviors GENERALLY predict becoming engaged," not "what
+# predicted engagement in one specific month." A single-month snapshot and a
+# per-user last_seen-anchored version were both tried and reverted: a single
+# month is fragile to a feature launching partway through that one month
+# (zero history that month makes it look falsely unimportant), and gives
+# less training data than a panel.
+#   T              = last calendar day of each month in the data range, kept
+#                    only if a full WINDOW_DAYS outcome window fits before
+#                    data_max_date.
+#   Feature window = [T-29, T]           (per snapshot)
+#   Outcome window = [T+1, T+30]         (see power_user_temporal_analysis.py)
+# Every user can appear in MULTIPLE snapshot rows (once per eligible month) --
+# one model is trained on all eligible (user_id, snapshot_T) rows together.
+#
+# data_max_date = min(live Databricks event max date, personas_history.parquet's
+# own max date) -- NOT just whichever is in the local file, since that file is
+# a separately-pulled snapshot that can lag behind live event data.
+#
+# This script is the single source of truth for the snapshot list: it writes
+# them to metadata.json, which power_user_temporal_analysis.py reads rather
+# than recomputing, so the two scripts can't silently disagree.
 WINDOW_DAYS = 30
 OUT_FILE = DATA_DIR / "feature_usage_early.parquet"
+META_FILE = DATA_DIR / "temporal_metadata.json"
 
 spark = (DatabricksSession.builder
     .host("https://dbc-e3820aff-eed5.cloud.databricks.com")
@@ -23,123 +41,102 @@ spark = (DatabricksSession.builder
     .clusterId("0729-215459-czqsw00g")
     .getOrCreate())
 
-# We want each user's usage in [T-29, T], where T = their own last_seen date
-# minus WINDOW_DAYS -- NOT the 30 days ending at last_seen. This leaves the
-# 30 days AFTER T (up to last_seen) free for power_user_temporal_analysis.py
-# to check the label against, without any overlap between features and
-# outcome. Collecting the full daily table to the driver blows past Spark's
-# 4 GB result limit, so we aggregate SERVER-SIDE and only bring back one row
-# per (user, sub_feature).
-ph = pd.read_parquet(
-    DATA_DIR / "personas_history.parquet", columns=["user_id", "score_date"]
-)
+event_max_date = spark.sql("""
+    SELECT MAX(to_date(time_period)) AS max_date
+    FROM models_prod.dbt.fact_product_all_events_by_user_by_day
+    WHERE product IN ('Work', 'Vincent')
+""").toPandas()["max_date"].iloc[0]
+event_max_date = pd.Timestamp(event_max_date)
+
+ph = pd.read_parquet(DATA_DIR / "personas_history.parquet", columns=["score_date"])
 ph["score_date"] = pd.to_datetime(ph["score_date"], errors="coerce")
-last_seen = ph.groupby("user_id")["score_date"].max().rename("last_seen")
-ph = ph.merge(last_seen, on="user_id", how="left")
-ph["landmark_day"] = ph["last_seen"] - pd.Timedelta(days=WINDOW_DAYS)          # T
-ph["window_start"] = ph["landmark_day"] - pd.Timedelta(days=WINDOW_DAYS - 1)   # T-29
-print(f"Per-user FEATURE window: [T-29, T], where T = last_seen - {WINDOW_DAYS}d "
-      f"(leaves the following {WINDOW_DAYS}d free for the outcome label)")
-early_days = ph.loc[
-    (ph["score_date"] >= ph["window_start"]) & (ph["score_date"] <= ph["landmark_day"]),
-    ["user_id", "score_date"],
-].copy()
-early_days["score_date"] = early_days["score_date"].dt.strftime("%Y-%m-%d")
-early_days = early_days.dropna().drop_duplicates()
-print(f"Feature-window (last {WINDOW_DAYS} calendar days ending at T, per user) user-days: {len(early_days):,}")
-spark.createDataFrame(early_days).createOrReplaceTempView("early_days")
+persona_min_date, persona_max_date = ph["score_date"].min(), ph["score_date"].max()
 
-# --- Whitelist of Clio Work + Vincent user-triggered sub_features -------------
-# Rule, applied to CW Event Audit:
-#   Product in {Work, Vincent}  AND  user_triggered = TRUE
-#   so drop "Vincent RA - Homepage Viewed", "Manage - Clicked Start Trial", "Manage - Work Trial Activation Page Viewed", "Manage - Work Trial CTA Dismissed", "Manage - Work Trial CTA Viewed"
-#   but keep "Matter - AI Action Generated", "Matter - AI Action Viewed"
+data_max_date = min(event_max_date, persona_max_date)
+print(f"Live event max date (Databricks):     {event_max_date.date()}")
+print(f"Local persona max date (snapshot):    {persona_max_date.date()}"
+      + (" <-- STALE, lags behind live events" if persona_max_date < event_max_date else ""))
+print(f"data_max_date (min of both):          {data_max_date.date()}")
 
-WHITELIST = [
-    # Vincent RA
-    "Vincent RA - Collection Accessed",
-    "Vincent RA - Collection Connected",
-    "Vincent RA - Collection creation",
-    "Vincent RA - Collection Opened",
-    "Vincent RA - Connect Collection Clicked",
-    "Vincent RA - Jurisdiction Selected",
-    "Vincent RA - Matter Selected",
-    "Vincent RA - New Conversation Started",
-    "Vincent RA - Output Copied",
-    "Vincent RA - Output Saved",
-    "Vincent RA - Query Classification",
-    "Vincent RA - Recent Conversation Opened",
-    "Vincent RA - Document Downloaded",
-    "Vincent RA - Document processed complete",
-    "Vincent RA - Document upload",
-    "Vincent RA - Legal Authorities Tab Closed",
-    "Vincent RA - Legal Authorities Tab Viewed",
-    "Vincent RA - Reference Clicked",
-    "Vincent RA - Tables Auto Generate Selected",
-    "Vincent RA - Tables Empty Table Selected",
-    "Vincent RA - Tables Template Selected",
-    "Vincent RA - Task submission",
-    # Tasks
-    "Task: contract_inconsistencies_overlap",
-    "Task: contract_risk_mitigations",
-    "Task: discuss",
-    "Task: draft_questionnaire",
-    "Task: extract_claims",
-    "Task: extract_facts",
-    "Task: free_form_message",
-    "Task: memo",
-    "Task: others",
-    "Task: propose_defenses",
-    "Task: support_proposition",
-    # Legal Pad
-    "Text Editor Opened",
-    "Text Editor Updated",
-    # Workflows
-    "Workflow: analyze_complaint",
-    "Workflow: analyze_contract",
-    "Workflow: analyze_judicial_proceedings",
-    "Workflow: build_argument",
-    "Workflow: build_argument_with_facts",
-    "Workflow: default",
-    "Workflow: others",
-    "Workflow: research",
-    "Workflow: tabular_review",
+month_ends = pd.date_range(persona_min_date, data_max_date, freq="ME")
+snapshots = pd.DataFrame({"T": month_ends})
+snapshots["window_start"] = snapshots["T"] - pd.Timedelta(days=WINDOW_DAYS - 1)
+snapshots["outcome_end"] = snapshots["T"] + pd.Timedelta(days=WINDOW_DAYS)
+snapshots = snapshots.loc[snapshots["outcome_end"] <= data_max_date].reset_index(drop=True)
+print(f"Valid monthly snapshots ({len(snapshots)}): {[t.date().isoformat() for t in snapshots['T']]}")
 
-    "Matter - AI Action Clicked",
-    "Matter - AI Action Dismissed",
-    #should keep these two  
-    "Matter - AI Action Generated", 
-    "Matter - AI Action Viewed", 
+metadata = {
+    "event_max_date": event_max_date.date().isoformat(),
+    "persona_max_date": persona_max_date.date().isoformat(),
+    "persona_snapshot_is_stale": bool(persona_max_date < event_max_date),
+    "data_max_date": data_max_date.date().isoformat(),
+    "window_days": WINDOW_DAYS,
+    "snapshots": [
+        {"T": row.T.date().isoformat(),
+         "feature_window_start": row.window_start.date().isoformat(),
+         "feature_window_end": row.T.date().isoformat(),
+         "outcome_window_start": (row.T + pd.Timedelta(days=1)).date().isoformat(),
+         "outcome_window_end": row.outcome_end.date().isoformat()}
+        for row in snapshots.itertuples()
+    ],
+}
+META_FILE.write_text(json.dumps(metadata, indent=2))
+print(f"Wrote {META_FILE}")
 
-    "Manage - Recent Work Conversation Opened", 
-    "Manage - Document Analyzed in Vincent",
-    "Work - Draft Opened",
-    "Work - Library Opened",
-    "Work - Work Opened",
-    "Work - Work Opened (Excludes App Switcher)",
+snap_push = snapshots[["T", "window_start"]].copy()
+snap_push["T"] = snap_push["T"].dt.strftime("%Y-%m-%d")
+snap_push["window_start"] = snap_push["window_start"].dt.strftime("%Y-%m-%d")
+spark.createDataFrame(snap_push).createOrReplaceTempView("snapshots")
+
+# --- Feature universe: everything in Work/Vincent, minus known non-actions ---
+# Previously this used a hand-maintained WHITELIST of ~54 specific sub_feature
+# names -- a static snapshot that could miss valid actions or drift from the
+# real product surface over time. Replaced with the inverse: pull EVERYTHING
+# where product IN ('Work', 'Vincent'), and only exclude the small number of
+# sub_features confirmed excluded in the real CW Event Audit catalog:
+#   - "Vincent RA - Homepage Viewed": Is User Triggered = FALSE, no override note
+#   - "Manage - Clicked Start Trial": the ONLY Trial-related row explicitly
+#     marked "Excluded" in the catalog (the other three Trial rows -- Work
+#     Trial Activation Page Viewed / CTA Dismissed / CTA Viewed -- have no
+#     such note and are correctly included)
+# NOTE: "Matter - AI Action Generated" and "Matter - AI Action Viewed" are
+# Is User Triggered = FALSE too, but the catalog explicitly annotates "we
+# should include them" -- kept in, not denied.
+# "Vincent Agentic - *" sub_features are excluded entirely (separate from the
+# above): they aren't in the CW Event Audit catalog at all (which only lists
+# Vincent's Collection/Conversation/Document/Legal Authorities/Tables/Task/
+# Legal Pad/Workflows categories, no "Agentic" category), so they're outside
+# the audited feature set this analysis is scoped to.
+DENYLIST = [
+    "Vincent RA - Homepage Viewed",   # Is User Triggered = FALSE, no override
+    "Manage - Clicked Start Trial",   # explicitly marked "Excluded" in the catalog
 ]
-print(f"User-triggered whitelist (Naoko's Work tab + overrides): {len(WHITELIST)} sub_features")
-spark.createDataFrame(pd.DataFrame({"sub_feature": WHITELIST})).createOrReplaceTempView("allowed_features")
+print(f"Pulling all Work/Vincent sub_features, excluding {len(DENYLIST)} known non-actions "
+      f"and all 'Vincent Agentic - *' features...")
+spark.createDataFrame(pd.DataFrame({"sub_feature": DENYLIST})).createOrReplaceTempView("denied_features")
 
-print("Pulling EARLY-WINDOW sub_feature intensity (aggregated server-side)...")
+print("Pulling FEATURE-WINDOW sub_feature intensity per monthly snapshot (aggregated server-side)...")
 df = spark.sql("""
     SELECT
         f.clio_user_c AS user_id,
+        s.T           AS snapshot_t,
         f.sub_feature,
         SUM(f.event_count)            AS early_events,
         COUNT(DISTINCT f.time_period) AS early_active_days
     FROM models_prod.dbt.fact_product_all_events_by_user_by_day f
-    JOIN early_days d
-      ON f.clio_user_c = d.user_id
-     AND to_date(f.time_period) = to_date(d.score_date)
-    JOIN allowed_features a
-      ON f.sub_feature = a.sub_feature
-    GROUP BY f.clio_user_c, f.sub_feature
+    JOIN snapshots s
+      ON to_date(f.time_period) BETWEEN to_date(s.window_start) AND to_date(s.T)
+    LEFT ANTI JOIN denied_features x
+      ON f.sub_feature = x.sub_feature
+    WHERE f.product IN ('Work', 'Vincent')
+      AND f.sub_feature NOT LIKE 'Vincent Agentic%'
+    GROUP BY f.clio_user_c, s.T, f.sub_feature
 """).toPandas()
 df.attrs = {}
 df.to_parquet(OUT_FILE, index=False)
 print(f"Done: {OUT_FILE} ({len(df):,} rows, "
       f"{df['sub_feature'].nunique():,} sub_features, "
-      f"{df['user_id'].nunique():,} users)")
+      f"{df['user_id'].nunique():,} distinct users, "
+      f"{df['snapshot_t'].nunique():,} snapshots)")
 
 print("All done!")

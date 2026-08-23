@@ -1,33 +1,55 @@
 #!/usr/bin/env python3
-"""FORWARD-LOOKING engagement model: does a user's RECENT sub_feature usage
-predict them hitting the engaged bar (>= MIN_POWER_DAYS distinct Power/Elite
-days) in the FOLLOWING 30 days?
+"""FORWARD-LOOKING CONVERSION model: which recent sub_feature usage GENERALLY
+predicts a user who has NOT YET reached Power/Elite becoming one (>=
+MIN_POWER_DAYS distinct Power/Elite days) in the FOLLOWING 30 days -- not
+just what predicted it in one specific month, and not mixed with
+already-Power/Elite users simply continuing to qualify.
 
-Leak-safe by construction, with no overlap between features and outcome:
+Leak-safe by construction, with no overlap between features and outcome,
+using MULTIPLE FIXED, SHARED monthly snapshots (a panel), not per-user
+last_seen anchoring and not a single month. A single-month version was tried
+and reverted: it's fragile to a feature launching partway through that one
+month (zero history that month makes it look falsely unimportant, not
+because it isn't), and gives less training data. A panel averages SHAP
+across several recent snapshots, so a feature's importance reflects its
+effect once it has real history, not just its (possibly nonexistent) history
+in one arbitrarily-chosen month:
 
-  * Landmark day T : each user's own last_seen date minus WINDOW_DAYS -- NOT
-                      last_seen itself. Anchored per-user, not one shared
-                      cutoff for everyone.
-  * Feature window : [T-29, T] -- their recent 30-day usage AS OF T.
-  * Target window  : (T, T+WINDOW_DAYS] = (T, last_seen] -- the 30 days
-                      AFTER T, using every bit of their remaining tracked
-                      history. This is a genuine future window relative to
-                      the features, not the same window scored twice.
-  * Population     : anyone active (persona at T is not Inactive) with a
-                      full feature window available in their tracked history
-                      -- regardless of whether they were already engaged
-                      before T. Engaged and not-yet-engaged users are both
-                      included; this is one unified "will they be engaged in
-                      30 days" question, not split into separate
-                      staying-engaged / becoming-engaged models.
+  * Snapshots      : T = the last calendar day of each month in the data,
+                      kept only if a full WINDOW_DAYS outcome window fits
+                      before data_max_date (see pull_data.py, which computes
+                      data_max_date from live Databricks data reconciled
+                      against personas_history.parquet, and writes the
+                      snapshot list to metadata.json -- read here, not
+                      recomputed, so the two scripts can't disagree).
+                      Every user can appear in MULTIPLE snapshot rows (once
+                      per eligible month).
+  * Feature window : [T-29, T] per snapshot -- recent 30-day usage AS OF T.
+  * Target window  : (T, T+WINDOW_DAYS] per snapshot -- the 30 days AFTER T,
+                      a genuine future window, no overlap with features.
+  * Population     : per snapshot, anyone NOT already at Power/Elite and not
+                      Inactive at T, with a full feature window available in
+                      their tracked history as of that T -- i.e. only users
+                      who have NOT YET reached the engaged bar. This isolates
+                      genuine new conversions, separate from an
+                      already-engaged user simply continuing to qualify.
   * Label          : engaged = >= MIN_POWER_DAYS distinct Power/Elite days
-                      WITHIN the target window (T, T+WINDOW_DAYS].
+                      WITHIN that snapshot's target window. Persona-based.
+  * Cross-validation: StratifiedGroupKFold, grouped by user_id -- since the
+                      same user can have multiple snapshot rows, plain
+                      StratifiedKFold could split one user's rows across
+                      train AND test folds (a same-user leakage path across
+                      months). Grouping keeps all of a user's rows in one
+                      fold.
 
-So the model answers "does recent usage predict engagement 30 days from now"
--- a real forecast, not a concurrent snapshot. (An earlier version of this
-script scored the SAME window for both features and label, which was
-associational rather than predictive; that design has been replaced by this
-one.)
+OPEN QUESTION (unresolved as of this version): whether user_category_persona
+is computed cumulative-since-day-0 or from a trailing rolling window (e.g.
+90 days) internally. Real sample data examined this session suggested
+cumulative-since-day-0 (no leakage risk), but this hasn't been confirmed
+with whoever owns the scoring pipeline. If it turns out to be a rolling
+window wider than WINDOW_DAYS, every month-to-next-month design here
+(including this one) would need a gap inserted between feature and target
+windows to stay leak-safe.
 
 Run:
     python power_user_temporal_analysis.py
@@ -36,6 +58,7 @@ Outputs land in ./outputs/temporal/.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -56,7 +79,7 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 
 # ---------------------------------------------------------------------------
 # data/ is shared at the repo root (one level up from this analysis folder) so
@@ -67,23 +90,27 @@ RANDOM_STATE = 42  # fixed random seed for reproducibility
 
 POWER_TIERS = {"Power User", "Elite Power User"}
 MIN_POWER_DAYS = 7      # distinct power-tier days needed to count as "engaged"
-# Exclude users whose persona AT THE LANDMARK DAY T is one of these -- Inactive
-# users have essentially no recent behavior to model. New/Casual/Core/Power/
-# Elite are ALL included: this is a unified "will they be engaged in 30 days"
-# question, not split by current engagement status.
-EXCLUDE_TIERS_AT_T = {"Inactive"}
+# Exclude users whose persona AT THE SNAPSHOT DAY T is one of these. Inactive
+# has essentially no recent behavior to model. Power User / Elite Power User
+# are excluded so the population is only users who have NOT YET reached the
+# engaged bar -- this asks "which behaviors predict becoming a Power/Elite
+# user for the first time," not a mix of that plus already-engaged users
+# simply continuing to qualify (the earlier "unified" design).
+EXCLUDE_TIERS_AT_T = {"Inactive", "Power User", "Elite Power User"}
 # sub_features to drop from the MODEL/SHAP importance only (still pulled by
 # pull_data.py, just not scored here) -- e.g. redundant with another variant.
+# Known non-actions (Is User Triggered = FALSE, Trial/marketing CTAs) are now
+# excluded upstream in pull_data.py's DENYLIST instead, so they're not pulled
+# at all.
 EXCLUDE_FEATURES = {"Work - Work Opened (Excludes App Switcher)"}
 # Feature window length AND target (outcome) window length, both WINDOW_DAYS
 # calendar days: features from [T-29, T], label checked in (T, T+WINDOW_DAYS].
-# Must match WINDOW_DAYS in pull_data.py.
+# Must match WINDOW_DAYS and the snapshot list logic in pull_data.py.
 WINDOW_DAYS = 30
 FEATURE_FILE = DATA_DIR / "feature_usage_early.parquet"
 OUT_DIR = Path(__file__).resolve().parent / "outputs" / "temporal"
 # Cohort filter: analyze only users who JOINED (first persona snapshot) on/after
-# this date, to focus on the current-product era. None = all users. Set to
-# "2026-01-01" to keep 2026 joiners only (drops the Nov-Dec 2025 cohort).
+# this date, to focus on the current-product era. None = all users.
 JOINED_SINCE = None
 # Restrict to a Clio Work customer segment (reads data/payment_status.parquet:
 # columns user_id, customer_segment). "Paid" = paid Work customers only (drops
@@ -97,62 +124,85 @@ def _sanitize(name: str) -> str:
     return cleaned if cleaned else "(unlabeled)"
 
 
-def build_window_frame() -> pd.DataFrame:
-    """Per-user forward-looking frame: what's their persona at landmark day T,
-    and do they hit the engaged bar in the 30 days AFTER T?
+def _load_snapshot_metadata() -> dict:
+    """The snapshot list (each T and the feature/outcome window it implies)
+    is decided ONCE, in pull_data.py, using the live Databricks event max
+    date reconciled against personas_history.parquet's own max date -- not
+    recomputed here. Recomputing it independently from the local persona
+    file risked the two scripts silently disagreeing (e.g. if the persona
+    snapshot is stale relative to live event data). Run pull_data.py first
+    if this is missing.
+    """
+    meta_file = DATA_DIR / "temporal_metadata.json"
+    if not meta_file.exists():
+        raise FileNotFoundError(
+            f"{meta_file} not found -- run `python pull_data.py` first; it "
+            "computes the snapshot list from live Databricks data and writes this file."
+        )
+    with open(meta_file) as f:
+        meta = json.load(f)
+    if meta.get("persona_snapshot_is_stale"):
+        print(f"WARNING: personas_history.parquet ({meta['persona_max_date']}) is stale relative to "
+              f"live event data ({meta['event_max_date']}) -- population/label use the stale persona "
+              f"snapshot, so results are bounded by whichever source lags. Re-pull personas_history "
+              f"for fresher snapshots.")
+    return meta
 
-    T is anchored PER USER on their own last_seen date minus WINDOW_DAYS, not
-    a single shared calendar cutoff -- a user last active in March is scored
-    on their own T from March, not everyone else's.
+
+def build_window_frame() -> pd.DataFrame:
+    """Panel frame: one row per (user_id, snapshot_t) -- what's their persona
+    at that snapshot's T, and do they hit the engaged bar in the 30 days
+    AFTER it? Every eligible user appears once per eligible monthly snapshot.
     """
     ph = pd.read_parquet(
         DATA_DIR / "personas_history.parquet",
         columns=["user_id", "user_category_persona", "score_date"],
     )
     ph["score_date"] = pd.to_datetime(ph["score_date"], errors="coerce")
+    ph = ph.dropna(subset=["score_date"])
 
-    joined = ph.groupby("user_id")["score_date"].min()      # journey start (join date)
-    last_seen = ph.groupby("user_id")["score_date"].max()   # most recent activity
-    landmark_day = last_seen - pd.Timedelta(days=WINDOW_DAYS)             # T
-    feature_window_start = landmark_day - pd.Timedelta(days=WINDOW_DAYS - 1)  # T-29
+    joined = ph.groupby("user_id")["score_date"].min()  # journey start (join date)
+    meta = _load_snapshot_metadata()
+    snapshots = pd.DataFrame({"T": [pd.Timestamp(s["T"]) for s in meta["snapshots"]]})
+    print(f"Snapshots (from pull_data.py's metadata, {len(snapshots)}): "
+          f"{[t.date().isoformat() for t in snapshots['T']]}")
 
-    # Persona AT the landmark day T (exact-day match; daily snapshot cadence
-    # makes a missing exact match rare).
-    ph_t = ph.merge(landmark_day.rename("landmark_day"), on="user_id", how="left")
-    at_t = ph_t.loc[ph_t["score_date"] == ph_t["landmark_day"]].set_index("user_id")
-    persona_at_t = at_t["user_category_persona"]
+    power_days = (
+        ph.loc[ph["user_category_persona"].isin(POWER_TIERS), ["user_id", "score_date"]]
+        .drop_duplicates()
+    )
 
-    # Distinct power-tier days strictly AFTER T (the target/outcome window;
-    # since T = last_seen - WINDOW_DAYS, this is exactly the WINDOW_DAYS days
-    # up to and including last_seen).
-    pw = ph.merge(landmark_day.rename("landmark_day"), on="user_id", how="left")
-    pw = pw.loc[pw["user_category_persona"].isin(POWER_TIERS), ["user_id", "score_date", "landmark_day"]]
-    power_after_t = pw.loc[pw["score_date"] > pw["landmark_day"]].groupby("user_id")["score_date"].nunique()
+    rows = []
+    for t in snapshots["T"]:
+        window_start = t - pd.Timedelta(days=WINDOW_DAYS - 1)
 
-    users = pd.Index(ph["user_id"].unique(), name="user_id")
-    frame = pd.DataFrame(index=users)
-    frame["joined"] = joined.reindex(users)
-    frame["last_seen"] = last_seen.reindex(users)
-    frame["landmark_day"] = landmark_day.reindex(users)
-    frame["feature_window_start"] = feature_window_start.reindex(users)
-    frame["persona_at_t"] = persona_at_t.reindex(users)
-    frame["power_days_after_t"] = power_after_t.reindex(users, fill_value=0).astype(int)
+        persona_at_t = (
+            ph.loc[ph["score_date"] == t]
+            .drop_duplicates("user_id")
+            .set_index("user_id")["user_category_persona"]
+        )
+        power_after_t = (
+            power_days.loc[(power_days["score_date"] > t) & (power_days["score_date"] <= t + pd.Timedelta(days=WINDOW_DAYS))]
+            .groupby("user_id")["score_date"].nunique()
+        )
 
-    # Population: active (not Inactive) at T, with a full WINDOW_DAYS feature
-    # window available in their tracked history (feature_window_start on/after
-    # their own join date) -- regardless of whether they were already engaged
-    # before T. No split by prior engagement status; see module docstring.
-    active_at_t = ~frame["persona_at_t"].isin(EXCLUDE_TIERS_AT_T) & frame["persona_at_t"].notna()
-    full_feature_window = frame["feature_window_start"] >= frame["joined"]
+        snap = pd.DataFrame(index=persona_at_t.index)
+        snap["snapshot_t"] = t
+        snap["joined"] = joined.reindex(snap.index)
+        snap["persona_at_t"] = persona_at_t
+        snap["power_days_after_t"] = power_after_t.reindex(snap.index, fill_value=0).astype(int)
 
-    # Cohort filter: keep only users who joined on/after JOINED_SINCE.
-    in_cohort = pd.Series(True, index=frame.index)
-    if JOINED_SINCE is not None:
-        in_cohort = frame["joined"] >= pd.Timestamp(JOINED_SINCE)
+        active_at_t = ~snap["persona_at_t"].isin(EXCLUDE_TIERS_AT_T) & snap["persona_at_t"].notna()
+        full_feature_window = snap["joined"] <= window_start
+        in_cohort = pd.Series(True, index=snap.index)
+        if JOINED_SINCE is not None:
+            in_cohort = snap["joined"] >= pd.Timestamp(JOINED_SINCE)
+        snap["at_risk"] = active_at_t & full_feature_window & in_cohort
+        snap["engaged"] = (snap["power_days_after_t"] >= MIN_POWER_DAYS).astype(int)
+        rows.append(snap.reset_index().rename(columns={"index": "user_id"}))
 
-    frame["at_risk"] = active_at_t & full_feature_window & in_cohort
+    frame = pd.concat(rows, ignore_index=True)
 
-    # Optional customer-segment restriction (e.g. paid Work customers only).
     if RESTRICT_SEGMENT is not None:
         seg_path = DATA_DIR / "payment_status.parquet"
         if not seg_path.exists():
@@ -162,42 +212,41 @@ def build_window_frame() -> pd.DataFrame:
             )
         seg = (pd.read_parquet(seg_path, columns=["user_id", "customer_segment"])
                .drop_duplicates("user_id").set_index("user_id")["customer_segment"])
-        in_segment = seg.reindex(frame.index).eq(RESTRICT_SEGMENT).fillna(False)
+        in_segment = frame["user_id"].map(seg).eq(RESTRICT_SEGMENT).fillna(False)
         frame["at_risk"] = frame["at_risk"] & in_segment.values
 
-    # Label: hits the engaged bar WITHIN the target window (T, T+WINDOW_DAYS]
-    # (1) vs. doesn't (0). A genuine future outcome relative to the features.
-    frame["engaged"] = (frame["power_days_after_t"] >= MIN_POWER_DAYS).astype(int)
     return frame
 
 
 def build_early_intensity_matrix(frame: pd.DataFrame) -> pd.DataFrame:
-    """One column per sub_feature: total events within each user's own
-    FEATURE window [T-29, T] (ending at their landmark day T, not last_seen).
+    """One column per sub_feature: total events within each (user_id,
+    snapshot_t) row's own FEATURE window [T-29, T].
 
-    The window aggregation is done server-side in pull_data.py (which uses
-    the same WINDOW_DAYS and the same T = last_seen - WINDOW_DAYS anchor), so
-    here we just pivot the summed early_events into a wide one-row-per-user
-    matrix.
+    The window aggregation is done server-side in pull_data.py (same
+    WINDOW_DAYS, same monthly-snapshot list), so here we just pivot the
+    summed early_events into a wide one-row-per-(user_id, snapshot_t) matrix.
     """
     early_path = FEATURE_FILE
     if not early_path.exists():
         raise FileNotFoundError(
             f"{early_path} not found -- run `python pull_data.py` first to pull the "
-            "early-window sub_feature intensity."
+            "feature-window sub_feature intensity."
         )
-    at_risk = frame.index[frame["at_risk"]]
+    at_risk = frame.loc[frame["at_risk"], ["user_id", "snapshot_t"]].drop_duplicates()
 
-    fu = pd.read_parquet(early_path, columns=["user_id", "sub_feature", "early_events"])
-    fu = fu[fu["user_id"].isin(at_risk)]
+    fu = pd.read_parquet(early_path, columns=["user_id", "snapshot_t", "sub_feature", "early_events"])
+    fu["snapshot_t"] = pd.to_datetime(fu["snapshot_t"])
+    fu = fu.merge(at_risk, on=["user_id", "snapshot_t"], how="inner")
 
     matrix = fu.pivot_table(
-        index="user_id", columns="sub_feature", values="early_events", aggfunc="sum", fill_value=0
+        index=["user_id", "snapshot_t"], columns="sub_feature", values="early_events",
+        aggfunc="sum", fill_value=0,
     )
     matrix.columns = [_sanitize(c) for c in matrix.columns]
-    # Users with no early-window events still belong in the frame as all-zero rows.
-    matrix = matrix.reindex(at_risk, fill_value=0)
-    return matrix.reset_index()
+    matrix = matrix.reset_index()
+    # Rows with no feature-window events at all still belong as all-zero rows.
+    matrix = at_risk.merge(matrix, on=["user_id", "snapshot_t"], how="left").fillna(0)
+    return matrix
 
 
 def main() -> None:
@@ -205,28 +254,31 @@ def main() -> None:
 
     frame = build_window_frame()
     matrix = build_early_intensity_matrix(frame)
-    labels = frame.loc[frame["at_risk"], ["engaged"]].reset_index()  # user_id, engaged
-    data = labels.merge(matrix, on="user_id", how="inner")
+    labels = frame.loc[frame["at_risk"], ["user_id", "snapshot_t", "engaged"]]
+    data = labels.merge(matrix, on=["user_id", "snapshot_t"], how="inner")
 
-    print(f"feature window = [T-29, T] | target window = (T, T+{WINDOW_DAYS}] | population = active "
-          f"(non-Inactive) users at T, any prior engagement status | "
-          f"engaged = >= {MIN_POWER_DAYS} power-tier days within the target window")
-    print(f"modeled users: {len(data):,} | sub_features: {data.shape[1] - 2}")
+    print(f"feature window = [T-29, T] | target window = (T, T+{WINDOW_DAYS}] | population = users "
+          f"NOT YET at Power/Elite at T (New/Casual/Core only) | "
+          f"engaged = >= {MIN_POWER_DAYS} power-tier days within the target window (genuine new conversion)")
+    print(f"modeled (user, snapshot) rows: {len(data):,} | distinct users: {data['user_id'].nunique():,} "
+          f"| sub_features: {data.shape[1] - 3}")
     print(f"engaged in the following {WINDOW_DAYS}d: {int(data['engaged'].sum()):,} ({data['engaged'].mean():.1%})")
 
     feature_cols = [
         c for c in data.columns
-        if c not in {"user_id", "engaged"} and _sanitize(c) not in {_sanitize(f) for f in EXCLUDE_FEATURES}
+        if c not in {"user_id", "snapshot_t", "engaged"} and _sanitize(c) not in {_sanitize(f) for f in EXCLUDE_FEATURES}
     ]
     # Window event counts are heavy-tailed; log1p keeps SHAP colors readable
     # (trees are invariant to it, so the model/importances are unchanged).
     X = np.log1p(data[feature_cols].astype(float))
     y = data["engaged"].to_numpy()
+    groups = data["user_id"].to_numpy()
 
-    # ---- Stratified 5-fold CV, fixed n_estimators (no early stopping) ----- #
-    # Every user's prediction and SHAP value come from a fold where they were
-    # HELD OUT (never seen during that fold's training) -- an honest,
-    # leak-free estimate using ALL the data, not just one 20% test slice.
+    # ---- Stratified GROUP 5-fold CV, fixed n_estimators (no early stopping) #
+    # Grouped by user_id: the same user's rows (across different monthly
+    # snapshots) always land in the same fold, so no user is ever seen in
+    # both train and test. Every row's prediction and SHAP value are
+    # out-of-fold (from a model that never saw that user during training).
     N_FOLDS = 5
     pos_weight = (y == 0).sum() / max((y == 1).sum(), 1)
     model_params = dict(
@@ -242,12 +294,12 @@ def main() -> None:
         random_state=RANDOM_STATE,
     )
 
-    cv = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     oof_proba = np.zeros(len(X))
     oof_shap = np.zeros((len(X), len(feature_cols)))
     gain_per_fold = []
 
-    for fold, (tr_idx, te_idx) in enumerate(cv.split(X, y), start=1):
+    for fold, (tr_idx, te_idx) in enumerate(cv.split(X, y, groups), start=1):
         fold_model = xgb.XGBClassifier(**model_params)
         fold_model.fit(X.iloc[tr_idx], y[tr_idx])
         oof_proba[te_idx] = fold_model.predict_proba(X.iloc[te_idx])[:, 1]
@@ -261,16 +313,16 @@ def main() -> None:
 
     auc = roc_auc_score(y, oof_proba)
     ap = average_precision_score(y, oof_proba)
-    print(f"\nOut-of-fold (5-fold CV) ROC-AUC = {auc:.3f} | PR-AUC = {ap:.3f}")
+    print(f"\nOut-of-fold (5-fold group CV) ROC-AUC = {auc:.3f} | PR-AUC = {ap:.3f}")
 
     # ---- Leakage sanity check: label permutation -------------------------- #
-    # Same 5-fold OOF scheme, but with labels shuffled at random beforehand.
+    # Same grouped OOF scheme, but with labels shuffled at random beforehand.
     # A genuinely leak-free setup should collapse to chance (ROC ~= 0.50)
     # once the label is pure noise.
     rng = np.random.RandomState(RANDOM_STATE)
     y_perm = rng.permutation(y)
     perm_oof_proba = np.zeros(len(X))
-    for tr_idx, te_idx in cv.split(X, y_perm):
+    for tr_idx, te_idx in cv.split(X, y_perm, groups):
         perm_model = xgb.XGBClassifier(**model_params)
         perm_model.fit(X.iloc[tr_idx], y_perm[tr_idx])
         perm_oof_proba[te_idx] = perm_model.predict_proba(X.iloc[te_idx])[:, 1]
@@ -290,7 +342,7 @@ def main() -> None:
     ax.plot([0, 1], [0, 1], color="grey", linestyle=":", label="chance (AUC = 0.50)")
     ax.set_xlabel("False positive rate")
     ax.set_ylabel("True positive rate")
-    ax.set_title("ROC curve (5-fold out-of-fold)")
+    ax.set_title("ROC curve (5-fold group out-of-fold)")
     ax.legend(fontsize=8, loc="lower right")
 
     ax = axes[1]
@@ -298,7 +350,7 @@ def main() -> None:
     ax.axhline(base_rate, color="grey", linestyle=":", label=f"base rate ({base_rate:.1%})")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
-    ax.set_title("Precision-Recall curve (5-fold out-of-fold)")
+    ax.set_title("Precision-Recall curve (5-fold group out-of-fold)")
     ax.legend(fontsize=8, loc="upper right")
 
     fig.suptitle(f"Model performance -- recent usage (last {WINDOW_DAYS} days) -> engaged in next {WINDOW_DAYS} days")
@@ -325,8 +377,9 @@ def main() -> None:
     imp["gain"] = imp["gain"].round(1)
     imp.to_csv(OUT_DIR / "sub_feature_importance.csv", index=False)
 
-    print("\nTop 10 recent-usage sub_features by mean|SHAP| (5-fold out-of-fold, predicting engagement 30 days out):")
-    print(imp[["sub_feature", "mean_abs_shap", "direction"]].head(10).to_string(index=False))
+    print("\nTop 5 stable recent-usage sub_features by mean|SHAP| averaged across snapshots "
+          "(5-fold group out-of-fold, predicting engagement 30 days out):")
+    print(imp[["sub_feature", "mean_abs_shap", "direction"]].head(5).to_string(index=False))
 
     # ---- Plots -------------------------------------------------------------#
     title = f"Recent usage (last {WINDOW_DAYS} days) -> engaged in next {WINDOW_DAYS} days"
@@ -342,13 +395,14 @@ def main() -> None:
     plt.savefig(OUT_DIR / "shap_importance_bar.png", dpi=160, bbox_inches="tight")
     plt.close()
 
-    # ---- Per-user explanations (out-of-fold, covers every modeled user) --- #
+    # ---- Per-(user, snapshot) explanations (out-of-fold) ------------------- #
     top_cols = imp["sub_feature"].head(40).tolist()
     top_idx = [feature_cols.index(c) for c in top_cols]
     per_user = pd.DataFrame(oof_shap[:, top_idx], columns=[f"shap__{c}" for c in top_cols])
     per_user.insert(0, "engaged", y)
+    per_user.insert(0, "snapshot_t", data["snapshot_t"].to_numpy())
     per_user.insert(0, "user_id", data["user_id"].to_numpy())
-    per_user.insert(2, "engaged_probability", oof_proba)
+    per_user.insert(3, "engaged_probability", oof_proba)
     per_user.to_csv(OUT_DIR / "per_user_shap.csv", index=False)
 
     # Final model, fit on ALL data, saved for scoring new/future users --
