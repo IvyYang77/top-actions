@@ -1,49 +1,49 @@
 sub_feature,mean_abs_shap,gain,direction
-Vincent RA - Task submission,0.64,80.3,1.0
-Text Editor Opened,0.359,23.5,1.0
-Work - Work Opened,0.293,19.6,1.0
-Vincent RA - Document upload,0.271,15.3,1.0
-Task: free_form_message,0.26,34.0,1.0
-Vincent RA - New Conversation Started,0.247,25.1,1.0
-Matter - AI Action Generated,0.217,13.7,1.0
-Workflow: default,0.201,18.4,1.0
-Vincent RA - Query Classification,0.183,16.1,1.0
-Matter - AI Action Viewed,0.177,12.0,1.0
-Vincent RA - Recent Conversation Opened,0.154,12.6,-1.0
-Workflow: others,0.154,15.4,1.0
-Vincent RA - Document Downloaded,0.121,12.6,-1.0
-Vincent RA - Matter Selected,0.12,12.0,-1.0
-Vincent RA - Legal Authorities Tab Viewed,0.12,12.5,1.0
-Vincent RA - Jurisdiction Selected,0.112,12.5,1.0
-Task: discuss,0.105,12.9,-1.0
-Task: memo,0.098,11.9,1.0
-Manage - Recent Work Conversation Opened,0.097,12.4,-1.0
-Manage - Document Analyzed in Vincent,0.09,14.7,1.0
-Vincent RA - Reference Clicked,0.075,13.6,1.0
-Vincent RA - Legal Authorities Tab Closed,0.06,11.1,-1.0
-Work - Library Opened,0.058,10.8,1.0
-Task: support_proposition,0.052,11.7,1.0
-Workflow: research,0.05,10.7,-1.0
-Task: others,0.047,11.1,1.0
-Text Editor Updated,0.045,14.0,1.0
-Vincent RA - Output Copied,0.043,11.7,-1.0
-Work - Draft Opened,0.036,11.4,1.0
-Task: contract_inconsistencies_overlap,0.031,11.4,-1.0
-Task: extract_claims,0.028,10.9,1.0
-Vincent RA - Output Saved,0.026,11.7,-1.0
-Task: extract_facts,0.024,9.4,-1.0
-Workflow: analyze_complaint,0.022,12.0,-1.0
-Matter - AI Action Clicked,0.015,10.7,-1.0
-Workflow: analyze_contract,0.013,11.5,-1.0
-Matter - AI Action Dismissed,0.013,15.6,1.0
-Task: propose_defenses,0.012,10.5,-1.0
-Workflow: build_argument_with_facts,0.011,12.6,1.0
-Task: contract_risk_mitigations,0.009,11.1,1.0
-Task: draft_questionnaire,0.008,8.8,-1.0
-Workflow: build_argument,0.007,9.7,1.0
-Vincent RA - Document processed complete,0.005,11.6,1.0
-Vincent RA - Tables Auto Generate Selected,0.003,9.2,-1.0
-Workflow: tabular_review,0.003,10.8,-1.0
-Vincent RA - Tables Empty Table Selected,0.001,8.3,1.0
-Workflow: analyze_judicial_proceedings,0.001,9.5,-1.0
-Vincent RA - Tables Template Selected,0.001,4.9,-1.0
+Vincent RA - Task submission,0.681,94.1,1.0
+Text Editor Opened,0.386,26.1,1.0
+Work - Work Opened,0.29,20.2,1.0
+Vincent RA - Document upload,0.273,16.3,1.0
+Vincent RA - New Conversation Started,0.245,27.9,1.0
+Task: free_form_message,0.24,30.0,1.0
+Matter - AI Action Generated,0.217,14.6,1.0
+Workflow: default,0.214,23.7,1.0
+Vincent RA - Query Classification,0.183,15.9,1.0
+Matter - AI Action Viewed,0.182,13.1,1.0
+Vincent RA - Recent Conversation Opened,0.169,17.5,-1.0
+Workflow: others,0.161,17.0,1.0
+Vincent RA - Jurisdiction Selected,0.122,13.9,1.0
+Vincent RA - Legal Authorities Tab Viewed,0.121,13.4,1.0
+Vincent RA - Document Downloaded,0.108,12.6,-1.0
+Vincent RA - Matter Selected,0.105,12.4,-1.0
+Manage - Document Analyzed in Vincent,0.101,15.5,1.0
+Task: discuss,0.1,13.5,-1.0
+Manage - Recent Work Conversation Opened,0.098,13.1,-1.0
+Task: memo,0.098,13.1,1.0
+Vincent RA - Reference Clicked,0.073,14.8,1.0
+Vincent RA - Legal Authorities Tab Closed,0.066,12.6,-1.0
+Work - Library Opened,0.065,12.9,1.0
+Vincent RA - Output Copied,0.055,12.6,-1.0
+Task: others,0.052,13.0,1.0
+Text Editor Updated,0.049,16.3,1.0
+Task: support_proposition,0.049,13.4,1.0
+Work - Draft Opened,0.045,12.1,1.0
+Workflow: research,0.043,11.6,-1.0
+Task: extract_claims,0.029,10.6,1.0
+Vincent RA - Output Saved,0.028,13.5,-1.0
+Workflow: analyze_complaint,0.024,12.8,-1.0
+Task: contract_inconsistencies_overlap,0.023,14.0,-1.0
+Task: extract_facts,0.021,9.4,-1.0
+Matter - AI Action Clicked,0.02,11.8,-1.0
+Workflow: build_argument_with_facts,0.014,14.3,1.0
+Task: draft_questionnaire,0.012,9.2,-1.0
+Task: propose_defenses,0.012,9.6,-1.0
+Workflow: analyze_contract,0.011,13.9,-1.0
+Task: contract_risk_mitigations,0.011,14.0,1.0
+Matter - AI Action Dismissed,0.01,15.5,1.0
+Workflow: build_argument,0.006,13.2,1.0
+Vincent RA - Tables Auto Generate Selected,0.006,9.6,-1.0
+Vincent RA - Document processed complete,0.005,9.3,1.0
+Workflow: tabular_review,0.003,11.7,-1.0
+Vincent RA - Tables Template Selected,0.002,5.5,-1.0
+Workflow: analyze_judicial_proceedings,0.002,11.5,1.0
+Vincent RA - Tables Empty Table Selected,0.001,8.8,1.0

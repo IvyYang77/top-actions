@@ -125,9 +125,11 @@ OUT_DIR = Path(__file__).resolve().parent / "outputs" / "temporal"
 # Cohort filter: analyze only users who JOINED (first persona snapshot) on/after
 # this date, to focus on the current-product era. None = all users.
 JOINED_SINCE = None
-# Restrict to a Clio Work customer segment (reads data/payment_status.parquet:
-# columns user_id, customer_segment). "Paid" = paid Work customers only (drops
-# trials, which have ~0 engaged events, and no-Work-segment users). None = all.
+# Restrict to a Clio Work customer segment AS OF EACH SNAPSHOT T (reads
+# data/payment_status.parquet: columns user_id, snapshot_t, customer_segment
+# -- account state at that exact T, not "is this user paid today"). "Paid"
+# = paid Work customers only (drops trials, which have ~0 engaged events,
+# and no-Work-segment users). None = all.
 RESTRICT_SEGMENT = "Paid"
 # --------------------------------------------------------------------------- #
 
@@ -235,9 +237,15 @@ def build_window_frame() -> pd.DataFrame:
                 f"{seg_path} not found -- run `python pull_payment_status.py` first, "
                 "or set RESTRICT_SEGMENT = None."
             )
-        seg = (pd.read_parquet(seg_path, columns=["user_id", "customer_segment"])
-               .drop_duplicates("user_id").set_index("user_id")["customer_segment"])
-        in_segment = frame["user_id"].map(seg).eq(RESTRICT_SEGMENT).fillna(False)
+        # Keyed (user_id, snapshot_t), not just user_id -- "was this user
+        # Paid on the exact snapshot date T we're modeling," not "is this
+        # user Paid today." A user who trialed at one T and converted by a
+        # later T must be filtered per-row, not with one current-state label
+        # applied to every one of their snapshot rows.
+        seg = pd.read_parquet(seg_path, columns=["user_id", "snapshot_t", "customer_segment"])
+        seg["snapshot_t"] = pd.to_datetime(seg["snapshot_t"])
+        merged_seg = frame[["user_id", "snapshot_t"]].merge(seg, on=["user_id", "snapshot_t"], how="left")
+        in_segment = merged_seg["customer_segment"].eq(RESTRICT_SEGMENT).fillna(False)
         frame["at_risk"] = frame["at_risk"] & in_segment.values
 
     return frame
