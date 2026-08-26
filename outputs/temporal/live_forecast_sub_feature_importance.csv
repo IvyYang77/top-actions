@@ -1,0 +1,60 @@
+sub_feature,mean_abs_shap
+Vincent RA - Recent Conversation Opened,0.446
+Text Editor Opened,0.325
+Vincent RA - New Conversation Started,0.264
+Text Editor Updated,0.24
+Matter - AI Action Viewed,0.227
+Vincent RA - Document upload,0.226
+Work - Work Opened,0.167
+Task: memo,0.135
+Workflow: others,0.13
+Matter - AI Action Generated,0.113
+Manage - Recent Work Conversation Opened,0.094
+Vincent RA - Legal Authorities Tab Viewed,0.09
+Vincent RA - Jurisdiction Selected,0.076
+Work - Draft Opened,0.076
+Vincent RA - Task submission,0.074
+Manage - Document Analyzed in Vincent,0.07
+Vincent RA - Output Saved,0.055
+Vincent RA - Matter Selected,0.047
+Task: free_form_message,0.04
+Workflow: default,0.038
+Vincent RA - Query Classification,0.038
+Vincent RA - Document Downloaded,0.038
+Matter - AI Action Clicked,0.037
+Document Modified by AI,0.035
+Vincent RA - Output Copied,0.031
+Task: discuss,0.03
+Vincent RA - Reference Clicked,0.024
+Task: others,0.022
+Workflow: analyze_contract,0.019
+Vincent RA - Legal Authorities Tab Closed,0.017
+Work - Library Opened,0.017
+Task: propose_defenses,0.015
+Workflow: research,0.013
+Task: contract_inconsistencies_overlap,0.011
+Document Conversation Started,0.01
+Task: contract_risk_mitigations,0.009
+Task: draft_questionnaire,0.009
+Workflow: build_argument,0.006
+Task: extract_claims,0.006
+Workflow: analyze_judicial_proceedings,0.006
+Vincent RA - Document processed complete,0.006
+Task: support_proposition,0.005
+Task: extract_facts,0.005
+Vincent RA - Tables Template Selected,0.005
+Workflow: build_argument_with_facts,0.004
+Workflow: analyze_complaint,0.004
+Vincent RA - Tables Auto Generate Selected,0.002
+Analyze Button Clicked,0.002
+Matter - AI Action Dismissed,0.002
+Workflow: tabular_review,0.001
+Vincent RA - Tables Empty Table Selected,0.0
+Auth Completed,0.0
+Template Saved,0.0
+Template Save Failed,0.0
+Template Progress Milestone Reached,0.0
+Template Builder Opened,0.0
+Template Builder Error,0.0
+Template Builder Abandoned,0.0
+Context Command Triggered,0.0

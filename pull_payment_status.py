@@ -45,7 +45,13 @@ if not meta_file.exists():
 with open(meta_file) as f:
     meta = json.load(f)
 snapshot_ts = [s["T"] for s in meta["snapshots"]]
-print(f"Snapshots (from temporal_metadata.json, {len(snapshot_ts)}): {snapshot_ts}")
+# Also pull the live (most recent complete month) snapshot, even if it's not
+# yet training-eligible -- forecast_live_month.py needs its segment data too,
+# and won't get it if this script only pulls the training-eligible list.
+live_t = meta.get("live_snapshot_t")
+if live_t and live_t not in snapshot_ts:
+    snapshot_ts.append(live_t)
+print(f"Snapshots (from temporal_metadata.json, {len(snapshot_ts)}, including live): {snapshot_ts}")
 
 spark = (DatabricksSession.builder
     .host("https://dbc-e3820aff-eed5.cloud.databricks.com")

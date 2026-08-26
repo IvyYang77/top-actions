@@ -1,0 +1,11 @@
+sub_feature,mean_abs_shap,gain,direction
+Text Editor Opened,0.464,94.2,1.0
+Vincent RA - Recent Conversation Opened,0.457,143.3,1.0
+Text Editor Updated,0.304,63.3,1.0
+Vincent RA - New Conversation Started,0.293,47.3,1.0
+Vincent RA - Document upload,0.26,30.2,1.0
+Matter - AI Action Viewed,0.224,27.8,-1.0
+Work - Work Opened,0.222,43.4,1.0
+Workflow: others,0.172,31.7,1.0
+Task: memo,0.122,31.0,1.0
+Matter - AI Action Generated,0.12,24.6,1.0

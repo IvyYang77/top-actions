@@ -32,19 +32,18 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # them to metadata.json, which power_user_temporal_analysis.py reads rather
 # than recomputing, so the two scripts can't silently disagree.
 WINDOW_DAYS = 30
-# Empirically confirmed this session (3 independent long-tenure users, each
-# active on day 0 then never again): user_category_persona/login_ratio is
-# computed from a TRAILING ROLLING WINDOW of roughly 90-103 days, not a
-# lifetime cumulative average -- all three hit an exact, sustained 0.00
-# within 90-103 days of their one active day, which a lifetime average could
-# not do for hundreds more days. That means a persona reading on any day
-# within (T, T+30] looks back far enough to fully contain the feature window
-# [T-29, T], so the old label leaked. OUTCOME_BUFFER_DAYS pushes the label's
-# read window to start at T+106 (label window T+106..T+135) -- set above the
-# observed max (103), not at the low end (90), so it fully clears the whole
-# observed range with margin rather than leaving a residual leakage sliver
-# for users whose rolling window runs closer to 103d.
-OUTCOME_BUFFER_DAYS = 105
+# personas_history.parquet now comes from the WINDOW=30 rebuild of the
+# persona pipeline (data_insights_prod.dev_ivy_yang.clio_work_daily_category_versions),
+# with WINDOW=30 confirmed directly from source code (both 0C/1C notebooks),
+# not empirically estimated. That means a persona reading on any day within
+# (T, T+30] looks back at most 30 days -- so a label read starting at T+31
+# (persona lookback [T+2, T+31]) cannot reach back into the feature window
+# [T-29, T]. OUTCOME_BUFFER_DAYS is set to exactly that minimum (30) plus a
+# 1-day margin, not the old 105 -- the old value was calibrated for the prior
+# 90-103-day-estimated production table (models_prod.dbt.
+# int_clio_work_user_category_scores_history) and would waste ~75 days of
+# buffer per snapshot for no reason against this table.
+OUTCOME_BUFFER_DAYS = 30
 OUT_FILE = DATA_DIR / "feature_usage_early.parquet"
 META_FILE = DATA_DIR / "temporal_metadata.json"
 
@@ -72,13 +71,37 @@ print(f"Local persona max date (snapshot):    {persona_max_date.date()}"
 print(f"data_max_date (min of both):          {data_max_date.date()}")
 
 month_ends = pd.date_range(persona_min_date, data_max_date, freq="ME")
-snapshots = pd.DataFrame({"T": month_ends})
-snapshots["window_start"] = snapshots["T"] - pd.Timedelta(days=WINDOW_DAYS - 1)
-snapshots["outcome_start"] = snapshots["T"] + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
-snapshots["outcome_end"] = snapshots["outcome_start"] + pd.Timedelta(days=WINDOW_DAYS - 1)
-snapshots = snapshots.loc[snapshots["outcome_end"] <= data_max_date].reset_index(drop=True)
-print(f"Valid monthly snapshots ({len(snapshots)}, outcome buffered +{OUTCOME_BUFFER_DAYS}d to clear "
+all_snapshots = pd.DataFrame({"T": month_ends})
+all_snapshots["window_start"] = all_snapshots["T"] - pd.Timedelta(days=WINDOW_DAYS - 1)
+# Single-day check (not a WINDOW_DAYS-wide outcome span): the earliest day
+# whose own 30d rolling persona lookback no longer reaches back into the
+# feature window [T-29, T]. Dropped the sustained ">=N days" requirement, so
+# a valid (TRAINING-eligible) snapshot only needs OUTCOME_BUFFER_DAYS+1 days
+# of runway after T, not OUTCOME_BUFFER_DAYS+WINDOW_DAYS.
+all_snapshots["check_day"] = all_snapshots["T"] + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
+
+# TRAINING snapshots: check_day already happened -- outcome is known, so
+# these can teach the model which features actually preceded engagement.
+snapshots = all_snapshots.loc[all_snapshots["check_day"] <= data_max_date].reset_index(drop=True)
+print(f"Valid (training) monthly snapshots ({len(snapshots)}, check day T+{OUTCOME_BUFFER_DAYS + 1} to clear "
       f"persona's own rolling lookback): {[t.date().isoformat() for t in snapshots['T']]}")
+
+# LIVE snapshot: the most recent COMPLETE month, regardless of whether its
+# check_day has happened yet. Its outcome is unknown -- can't be used to
+# train or validate anything -- but its own feature window [T-29, T] is
+# fully real, already-happened data, so an ALREADY-trained model can be
+# applied to it to forecast forward (see forecast_live_month.py). Pulled
+# into the same feature file as the training snapshots so nothing extra
+# needs pulling later.
+live_snapshot_t = all_snapshots["T"].iloc[-1]
+is_live_also_training = bool((snapshots["T"] == live_snapshot_t).any())
+print(f"Live (forecast-only) snapshot: T={live_snapshot_t.date().isoformat()}"
+      + (" (also a valid training snapshot)" if is_live_also_training else
+         f" (outcome not yet known -- check_day {(live_snapshot_t + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)).date().isoformat()} hasn't happened)"))
+
+# Pull features for every month-end (training-eligible or not) so the live
+# snapshot's feature window is always available without a second pull.
+snapshots_to_pull = all_snapshots
 
 metadata = {
     "event_max_date": event_max_date.date().isoformat(),
@@ -87,19 +110,20 @@ metadata = {
     "data_max_date": data_max_date.date().isoformat(),
     "window_days": WINDOW_DAYS,
     "outcome_buffer_days": OUTCOME_BUFFER_DAYS,
+    "live_snapshot_t": live_snapshot_t.date().isoformat(),
+    "live_snapshot_is_training_eligible": is_live_also_training,
     "snapshots": [
         {"T": row.T.date().isoformat(),
          "feature_window_start": row.window_start.date().isoformat(),
          "feature_window_end": row.T.date().isoformat(),
-         "outcome_window_start": row.outcome_start.date().isoformat(),
-         "outcome_window_end": row.outcome_end.date().isoformat()}
+         "check_day": row.check_day.date().isoformat()}
         for row in snapshots.itertuples()
     ],
 }
 META_FILE.write_text(json.dumps(metadata, indent=2))
 print(f"Wrote {META_FILE}")
 
-snap_push = snapshots[["T", "window_start"]].copy()
+snap_push = snapshots_to_pull[["T", "window_start"]].copy()
 snap_push["T"] = snap_push["T"].dt.strftime("%Y-%m-%d")
 snap_push["window_start"] = snap_push["window_start"].dt.strftime("%Y-%m-%d")
 spark.createDataFrame(snap_push).createOrReplaceTempView("snapshots")

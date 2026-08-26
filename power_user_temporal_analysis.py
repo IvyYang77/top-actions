@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """FORWARD-LOOKING CONVERSION model: which recent sub_feature usage GENERALLY
-predicts a user who has NOT YET reached Power/Elite becoming one (>=
-MIN_POWER_DAYS distinct Power/Elite days) in the FOLLOWING 30 days -- not
-just what predicted it in one specific month, and not mixed with
-already-Power/Elite users simply continuing to qualify.
+predicts a user who has NOT YET reached Power/Elite becoming one (single-day
+check: are they Power/Elite on the check day) shortly after -- not just what
+predicted it in one specific month, and not mixed with already-Power/Elite
+users simply continuing to qualify.
 
 Leak-safe by construction, with no overlap between features and outcome,
 using MULTIPLE FIXED, SHARED monthly snapshots (a panel), not per-user
@@ -25,8 +25,8 @@ in one arbitrarily-chosen month:
                       Every user can appear in MULTIPLE snapshot rows (once
                       per eligible month).
   * Feature window : [T-29, T] per snapshot -- recent 30-day usage AS OF T.
-  * Target window  : (T+OUTCOME_BUFFER_DAYS, T+OUTCOME_BUFFER_DAYS+WINDOW_DAYS]
-                      per snapshot. Buffered forward, not directly after T --
+  * Check day      : T + OUTCOME_BUFFER_DAYS + 1, a SINGLE day, not a window.
+                      Pushed forward from T, not checked immediately after --
                       see the rolling-window note below on why.
   * Population     : per snapshot, anyone NOT already at Power/Elite and not
                       Inactive at T, with a full feature window available in
@@ -34,8 +34,12 @@ in one arbitrarily-chosen month:
                       who have NOT YET reached the engaged bar. This isolates
                       genuine new conversions, separate from an
                       already-engaged user simply continuing to qualify.
-  * Label          : engaged = >= MIN_POWER_DAYS distinct Power/Elite days
-                      WITHIN that snapshot's target window. Persona-based.
+  * Label          : engaged = persona is Power/Elite on the check day (a
+                      single-day read, not a sustained multi-day count --
+                      dropped the earlier ">=7 days within a 30d window"
+                      requirement, since it forced the check day an extra
+                      30 days further out for no leak-safety benefit, only
+                      to have enough days to count 7 of them within).
   * Cross-validation: StratifiedGroupKFold, grouped by user_id -- since the
                       same user can have multiple snapshot rows, plain
                       StratifiedKFold could split one user's rows across
@@ -52,15 +56,14 @@ active day, which a lifetime cumulative average could not do for hundreds
 more days (an initial look at a coarser, every-10th-row sample of one user
 had suggested cumulative-since-day-0; a finer daily-resolution look at a
 longer-tenure user, plus these 3 corroborating cases, reversed that).
-Because the rolling lookback (~90-103 days) is wider than WINDOW_DAYS (30),
-a persona reading anywhere in (T, T+30] would look back far enough to fully
-contain the feature window [T-29, T] -- i.e. the label would be computed
-partly from the same activity as the features. OUTCOME_BUFFER_DAYS = 105 (in
-pull_data.py, mirrored here) pushes the target window to T+106..T+135 --
-above the observed max (103), not the low end (90), so it fully clears the
-whole observed range with margin. This costs snapshot months (a valid
-snapshot now needs OUTCOME_BUFFER_DAYS+WINDOW_DAYS of runway after T, not
-just WINDOW_DAYS), not just a widened target window's own dates.
+personas_history.parquet now comes from the WINDOW=30 rebuild of the persona
+pipeline (dev_ivy_yang.clio_work_daily_category), with WINDOW=30 confirmed
+from source, not estimated. A persona reading at day D looks back over
+[D-29, D]; to not overlap the feature window [T-29, T], D must be >= T+30.
+OUTCOME_BUFFER_DAYS=30 sets the check day to T+31 -- the earliest safe point,
+plus a 1-day margin. A valid snapshot now needs only OUTCOME_BUFFER_DAYS+1
+days of runway after T (not OUTCOME_BUFFER_DAYS+WINDOW_DAYS, since there's
+no separate multi-day outcome span to also fit before data_max_date).
 
 Run:
     python power_user_temporal_analysis.py
@@ -84,12 +87,7 @@ import matplotlib.pyplot as plt
 
 import shap
 import xgboost as xgb
-from sklearn.metrics import (
-    average_precision_score,
-    precision_recall_curve,
-    roc_auc_score,
-    roc_curve,
-)
+from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import StratifiedGroupKFold
 
 # ---------------------------------------------------------------------------
@@ -100,7 +98,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RANDOM_STATE = 42  # fixed random seed for reproducibility
 
 POWER_TIERS = {"Power User", "Elite Power User"}
-MIN_POWER_DAYS = 7      # distinct power-tier days needed to count as "engaged"
 # Exclude users whose persona AT THE SNAPSHOT DAY T is one of these. Inactive
 # has essentially no recent behavior to model. Power User / Elite Power User
 # are excluded so the population is only users who have NOT YET reached the
@@ -114,12 +111,13 @@ EXCLUDE_TIERS_AT_T = {"Inactive", "Power User", "Elite Power User"}
 # excluded upstream in pull_data.py's DENYLIST instead, so they're not pulled
 # at all.
 EXCLUDE_FEATURES = {"Work - Work Opened (Excludes App Switcher)"}
-# Feature window length AND target (outcome) window length, both WINDOW_DAYS
-# calendar days: features from [T-29, T], label checked in
-# (T+OUTCOME_BUFFER_DAYS, T+OUTCOME_BUFFER_DAYS+WINDOW_DAYS]. Must match
-# WINDOW_DAYS/OUTCOME_BUFFER_DAYS and the snapshot list logic in pull_data.py.
+# Feature window length, WINDOW_DAYS calendar days: features from [T-29, T].
+# Label is a single-day check at T+OUTCOME_BUFFER_DAYS+1, not a window. Must
+# match WINDOW_DAYS/OUTCOME_BUFFER_DAYS and the snapshot list logic in
+# pull_data.py -- both must agree or the two scripts' snapshot eligibility
+# and label timing will silently disagree.
 WINDOW_DAYS = 30
-OUTCOME_BUFFER_DAYS = 105  # label window T+106..T+135, clears observed 90-103d rolling range with margin
+OUTCOME_BUFFER_DAYS = 30  # check day T+31: earliest day whose own 30d rolling lookback clears [T-29, T]
 FEATURE_FILE = DATA_DIR / "feature_usage_early.parquet"
 OUT_DIR = Path(__file__).resolve().parent / "outputs" / "temporal"
 # Cohort filter: analyze only users who JOINED (first persona snapshot) on/after
@@ -137,6 +135,21 @@ RESTRICT_SEGMENT = "Paid"
 def _sanitize(name: str) -> str:
     cleaned = re.sub(r"[\[\]<>]", "_", str(name)).strip()
     return cleaned if cleaned else "(unlabeled)"
+
+
+def bar_chart(df: pd.DataFrame, title: str, out_path) -> None:
+    """Horizontal bar chart of the top rows in df (already sorted, already
+    limited to the N you want shown -- this just draws whatever it's given).
+    Expects columns 'sub_feature' and 'mean_abs_shap'.
+    """
+    plot_df = df.iloc[::-1]  # largest bar at the top
+    fig, ax = plt.subplots(figsize=(7, 0.45 * len(plot_df) + 1))
+    ax.barh(plot_df["sub_feature"], plot_df["mean_abs_shap"], color="#4C72B0")
+    ax.set_xlabel("mean |SHAP|")
+    ax.set_title(title, fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _load_snapshot_metadata() -> dict:
@@ -192,11 +205,6 @@ def build_window_frame() -> pd.DataFrame:
     print(f"Snapshots (from pull_data.py's metadata, {len(snapshots)}): "
           f"{[t.date().isoformat() for t in snapshots['T']]}")
 
-    power_days = (
-        ph.loc[ph["user_category_persona"].isin(POWER_TIERS), ["user_id", "score_date"]]
-        .drop_duplicates()
-    )
-
     rows = []
     for t in snapshots["T"]:
         window_start = t - pd.Timedelta(days=WINDOW_DAYS - 1)
@@ -206,18 +214,25 @@ def build_window_frame() -> pd.DataFrame:
             .drop_duplicates("user_id")
             .set_index("user_id")["user_category_persona"]
         )
-        outcome_start = t + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
-        outcome_end = outcome_start + pd.Timedelta(days=WINDOW_DAYS - 1)
-        power_after_t = (
-            power_days.loc[(power_days["score_date"] >= outcome_start) & (power_days["score_date"] <= outcome_end)]
-            .groupby("user_id")["score_date"].nunique()
+        # Single-day check, not a sustained 7+-of-30-days window: the check
+        # day is the earliest point that's still leak-safe (T + buffer + 1,
+        # where the persona's own WINDOW_DAYS-day lookback no longer reaches
+        # back into the feature window [T-29, T]). Dropped the sustained
+        # requirement -- it forced the check an extra WINDOW_DAYS further out
+        # (T+60 instead of T+31) for no leakage-safety benefit, just to have
+        # enough days to count 7 of them within.
+        check_day = t + pd.Timedelta(days=OUTCOME_BUFFER_DAYS + 1)
+        persona_at_check = (
+            ph.loc[ph["score_date"] == check_day]
+            .drop_duplicates("user_id")
+            .set_index("user_id")["user_category_persona"]
         )
 
         snap = pd.DataFrame(index=persona_at_t.index)
         snap["snapshot_t"] = t
         snap["joined"] = joined.reindex(snap.index)
         snap["persona_at_t"] = persona_at_t
-        snap["power_days_after_t"] = power_after_t.reindex(snap.index, fill_value=0).astype(int)
+        snap["persona_at_check"] = persona_at_check.reindex(snap.index)
 
         active_at_t = ~snap["persona_at_t"].isin(EXCLUDE_TIERS_AT_T) & snap["persona_at_t"].notna()
         full_feature_window = snap["joined"] <= window_start
@@ -225,7 +240,7 @@ def build_window_frame() -> pd.DataFrame:
         if JOINED_SINCE is not None:
             in_cohort = snap["joined"] >= pd.Timestamp(JOINED_SINCE)
         snap["at_risk"] = active_at_t & full_feature_window & in_cohort
-        snap["engaged"] = (snap["power_days_after_t"] >= MIN_POWER_DAYS).astype(int)
+        snap["engaged"] = snap["persona_at_check"].isin(POWER_TIERS).astype(int)
         rows.append(snap.reset_index().rename(columns={"index": "user_id"}))
 
     frame = pd.concat(rows, ignore_index=True)
@@ -290,10 +305,10 @@ def main() -> None:
     labels = frame.loc[frame["at_risk"], ["user_id", "snapshot_t", "engaged"]]
     data = labels.merge(matrix, on=["user_id", "snapshot_t"], how="inner")
 
-    print(f"feature window = [T-29, T] | target window = (T+{OUTCOME_BUFFER_DAYS}, T+{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}] "
-          f"(buffered past persona's own ~90-103d rolling lookback) | population = users "
+    print(f"feature window = [T-29, T] | check day = T+{OUTCOME_BUFFER_DAYS + 1} (single day, "
+          f"buffered past persona's own 30d rolling lookback) | population = users "
           f"NOT YET at Power/Elite at T (New/Casual/Core only) | "
-          f"engaged = >= {MIN_POWER_DAYS} power-tier days within the target window (genuine new conversion)")
+          f"engaged = Power/Elite on the check day (genuine new conversion)")
     print(f"modeled (user, snapshot) rows: {len(data):,} | distinct users: {data['user_id'].nunique():,} "
           f"| sub_features: {data.shape[1] - 3}")
     print(f"engaged in the buffered {WINDOW_DAYS}d target window: {int(data['engaged'].sum()):,} ({data['engaged'].mean():.1%})")
@@ -363,34 +378,8 @@ def main() -> None:
     perm_auc = roc_auc_score(y_perm, perm_oof_proba)
     print(f"Label-permutation check ROC-AUC = {perm_auc:.3f} (expect ~0.50; far from 0.50 would flag leakage)")
 
-    # ---- Performance curves (ROC + Precision-Recall, out-of-fold) --------- #
     base_rate = y.mean()
-    fpr, tpr, _ = roc_curve(y, oof_proba)
-    perm_fpr, perm_tpr, _ = roc_curve(y_perm, perm_oof_proba)
-    prec, rec, _ = precision_recall_curve(y, oof_proba)
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
-    ax = axes[0]
-    ax.plot(fpr, tpr, color="C0", label=f"model (AUC = {auc:.3f})")
-    ax.plot(perm_fpr, perm_tpr, color="C3", linestyle="--", label=f"label-permuted (AUC = {perm_auc:.3f})")
-    ax.plot([0, 1], [0, 1], color="grey", linestyle=":", label="chance (AUC = 0.50)")
-    ax.set_xlabel("False positive rate")
-    ax.set_ylabel("True positive rate")
-    ax.set_title("ROC curve (5-fold group out-of-fold)")
-    ax.legend(fontsize=8, loc="lower right")
-
-    ax = axes[1]
-    ax.plot(rec, prec, color="C0", label=f"model (PR-AUC = {ap:.3f})")
-    ax.axhline(base_rate, color="grey", linestyle=":", label=f"base rate ({base_rate:.1%})")
-    ax.set_xlabel("Recall")
-    ax.set_ylabel("Precision")
-    ax.set_title("Precision-Recall curve (5-fold group out-of-fold)")
-    ax.legend(fontsize=8, loc="upper right")
-
-    fig.suptitle(f"Model performance -- recent usage (last {WINDOW_DAYS}d) -> engaged {OUTCOME_BUFFER_DAYS}-{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}d later")
-    fig.tight_layout()
-    fig.savefig(OUT_DIR / "model_performance_curves.png", dpi=160, bbox_inches="tight")
-    plt.close(fig)
+    print(f"Base rate (share of at-risk rows that became engaged): {base_rate:.1%}")
 
     # ---- SHAP (out-of-fold, averaged across folds) ------------------------ #
     mean_abs = np.abs(oof_shap).mean(axis=0)
@@ -410,25 +399,68 @@ def main() -> None:
     imp["mean_abs_shap"] = imp["mean_abs_shap"].round(3)
     imp["gain"] = imp["gain"].round(1)
     imp.to_csv(OUT_DIR / "sub_feature_importance.csv", index=False)
-    imp.head(5).to_csv(OUT_DIR / "sub_feature_importance_top5.csv", index=False)
+    imp.head(10).to_csv(OUT_DIR / "sub_feature_importance_top10.csv", index=False)
 
-    print("\nTop 5 stable recent-usage sub_features by mean|SHAP| averaged across snapshots "
-          "(5-fold group out-of-fold, predicting engagement 30 days out):")
-    print(imp[["sub_feature", "mean_abs_shap", "direction"]].head(5).to_string(index=False))
-
-    # ---- Plots -------------------------------------------------------------#
-    title = f"Recent usage (last {WINDOW_DAYS}d) -> engaged {OUTCOME_BUFFER_DAYS}-{OUTCOME_BUFFER_DAYS + WINDOW_DAYS}d later"
-    shap.summary_plot(oof_shap, X, max_display=5, show=False)
-    plt.title(title)
+    print("\nTop 10 stable recent-usage sub_features by mean|SHAP| averaged across snapshots "
+          f"(5-fold group out-of-fold, predicting engagement on day T+{OUTCOME_BUFFER_DAYS + 1}):")
+    print(imp[["sub_feature", "mean_abs_shap", "direction"]].head(10).to_string(index=False))
+    bar_chart(
+        imp.head(10),
+        f"Top 10 predictors, pooled across all snapshots (engaged on day T+{OUTCOME_BUFFER_DAYS + 1})",
+        OUT_DIR / "sub_feature_importance_top10_bar.png",
+    )
+    shap.summary_plot(oof_shap, X, max_display=10, show=False)
+    plt.title(f"Top 10 predictors, pooled across all snapshots (engaged on day T+{OUTCOME_BUFFER_DAYS + 1})")
     plt.tight_layout()
-    plt.savefig(OUT_DIR / "shap_summary_beeswarm.png", dpi=160, bbox_inches="tight")
+    plt.savefig(OUT_DIR / "sub_feature_importance_top10_beeswarm.png", dpi=160, bbox_inches="tight")
     plt.close()
 
-    shap.summary_plot(oof_shap, X, plot_type="bar", max_display=5, show=False)
-    plt.title(title)
+    # ---- Per-snapshot breakdown -- same ONE pooled model's out-of-fold SHAP  #
+    # values, just grouped by which month's snapshot each row belongs to,     #
+    # instead of averaged across all of them. NOT a separate model per month  #
+    # (too little data per month to train reliably on its own) -- this reuses #
+    # the single, more stable pooled model and asks "for rows scored as of    #
+    # snapshot T, which features carried the most weight," month by month.   #
+    per_snapshot_rows = []
+    snapshot_ts_desc = sorted(data["snapshot_t"].unique(), reverse=True)  # most recent first
+    for t in snapshot_ts_desc:
+        idx = np.where(data["snapshot_t"].to_numpy() == t)[0]
+        month_mean_abs = np.abs(oof_shap[idx]).mean(axis=0)
+        month_imp = pd.DataFrame({"sub_feature": feature_cols, "mean_abs_shap": month_mean_abs})
+        month_imp = month_imp.sort_values("mean_abs_shap", ascending=False).head(10)
+        month_imp.insert(0, "snapshot_t", pd.Timestamp(t).date().isoformat())
+        month_imp.insert(1, "n_rows", len(idx))
+        per_snapshot_rows.append(month_imp)
+    per_snapshot = pd.concat(per_snapshot_rows, ignore_index=True)  # already most-recent-first
+    per_snapshot["mean_abs_shap"] = per_snapshot["mean_abs_shap"].round(3)
+    per_snapshot.to_csv(OUT_DIR / "sub_feature_importance_by_snapshot.csv", index=False)
+
+    latest_t_ts = pd.Timestamp(snapshot_ts_desc[0])  # for row-matching against `data` and .strftime()
+    latest_t = per_snapshot["snapshot_t"].iloc[0]  # string, for display/CSV grouping only
+    latest_grp = per_snapshot[per_snapshot["snapshot_t"] == latest_t]
+    print(f"\n*** MOST RECENT snapshot -- T={latest_t} ({latest_grp['n_rows'].iloc[0]} at-risk users), "
+          f"predicting engagement on day T+{OUTCOME_BUFFER_DAYS + 1} ***")
+    print(latest_grp[["sub_feature", "mean_abs_shap"]].to_string(index=False))
+    bar_chart(
+        latest_grp,
+        f"Top 10 predictors -- most recent snapshot T={latest_t} ({latest_grp['n_rows'].iloc[0]} at-risk users)",
+        OUT_DIR / "sub_feature_importance_latest_top10_bar.png",
+    )
+    latest_idx = np.where(data["snapshot_t"].to_numpy() == latest_t_ts)[0]
+    shap.summary_plot(oof_shap[latest_idx], X.iloc[latest_idx], max_display=10, show=False)
+    plt.title(f"Top 10 predictors -- most recent snapshot T={latest_t} ({latest_grp['n_rows'].iloc[0]} at-risk users)")
     plt.tight_layout()
-    plt.savefig(OUT_DIR / "shap_importance_bar.png", dpi=160, bbox_inches="tight")
+    plt.savefig(OUT_DIR / "sub_feature_importance_latest_top10_beeswarm.png", dpi=160, bbox_inches="tight")
     plt.close()
+
+    print(f"\nRemaining monthly snapshots (same pooled model, sliced by snapshot_t; "
+          f"most recent first), for context:")
+    for t, grp in per_snapshot.groupby("snapshot_t", sort=False):
+        if t == latest_t:
+            continue
+        n = grp["n_rows"].iloc[0]
+        print(f"\n  T={t}  ({n} at-risk users)")
+        print(grp[["sub_feature", "mean_abs_shap"]].to_string(index=False))
 
     # ---- Per-(user, snapshot) explanations (out-of-fold) ------------------- #
     top_cols = imp["sub_feature"].head(40).tolist()
