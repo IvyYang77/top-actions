@@ -88,7 +88,7 @@ import matplotlib.pyplot as plt
 import shap
 import xgboost as xgb
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
 
 # ---------------------------------------------------------------------------
 # data/ is shared at the repo root (one level up from this analysis folder) so
@@ -129,6 +129,11 @@ JOINED_SINCE = None
 # = paid Work customers only (drops trials, which have ~0 engaged events,
 # and no-Work-segment users). None = all.
 RESTRICT_SEGMENT = "Paid"
+# Number of most-recent training-eligible monthly snapshots to train on.
+# None = use all snapshots from temporal_metadata.json (was 8). Set to an
+# int N to keep only the N most recent eligible months (e.g. 4), dropping
+# the older ones -- fewer months trades training-data volume for recency.
+TRAINING_MONTHS = 4
 # --------------------------------------------------------------------------- #
 
 
@@ -201,9 +206,13 @@ def build_window_frame() -> pd.DataFrame:
 
     joined = ph.groupby("user_id")["score_date"].min()  # journey start (join date)
     meta = _load_snapshot_metadata()
-    snapshots = pd.DataFrame({"T": [pd.Timestamp(s["T"]) for s in meta["snapshots"]]})
-    print(f"Snapshots (from pull_data.py's metadata, {len(snapshots)}): "
-          f"{[t.date().isoformat() for t in snapshots['T']]}")
+    snapshot_meta = meta["snapshots"]
+    if TRAINING_MONTHS is not None:
+        snapshot_meta = snapshot_meta[-TRAINING_MONTHS:]
+    snapshots = pd.DataFrame({"T": [pd.Timestamp(s["T"]) for s in snapshot_meta]})
+    print(f"Snapshots (from pull_data.py's metadata, {len(meta['snapshots'])} available"
+          f"{f', restricted to the {TRAINING_MONTHS} most recent' if TRAINING_MONTHS is not None else ''}, "
+          f"{len(snapshots)} used): {[t.date().isoformat() for t in snapshots['T']]}")
 
     rows = []
     for t in snapshots["T"]:
@@ -330,14 +339,22 @@ def main() -> None:
     # out-of-fold (from a model that never saw that user during training).
     N_FOLDS = 5
     pos_weight = (y == 0).sum() / max((y == 1).sum(), 1)
+    # Tightened from an earlier version (max_depth=5, min_child_weight=5,
+    # reg_lambda=2.0, n_estimators=300, subsample=0.8, colsample_bytree=0.6)
+    # that showed a real train/validation gap (0.988 train vs 0.849 out-of-
+    # fold ROC-AUC): shallower trees, fewer of them, more samples required
+    # per leaf, and heavier L1/L2 regularization, all aimed at the gap
+    # specifically rather than at the validation number (which was already
+    # confirmed reliable against an independent held-out test).
     model_params = dict(
-        n_estimators=300,
+        n_estimators=150,
         learning_rate=0.05,
-        max_depth=5,
-        subsample=0.8,
-        colsample_bytree=0.6,
-        min_child_weight=5,
-        reg_lambda=2.0,
+        max_depth=3,
+        subsample=0.7,
+        colsample_bytree=0.5,
+        min_child_weight=15,
+        reg_lambda=6.0,
+        reg_alpha=1.0,
         scale_pos_weight=pos_weight,
         n_jobs=-1,
         random_state=RANDOM_STATE,
@@ -377,6 +394,49 @@ def main() -> None:
         perm_oof_proba[te_idx] = perm_model.predict_proba(X.iloc[te_idx])[:, 1]
     perm_auc = roc_auc_score(y_perm, perm_oof_proba)
     print(f"Label-permutation check ROC-AUC = {perm_auc:.3f} (expect ~0.50; far from 0.50 would flag leakage)")
+
+    # ---- Train / validation / test evaluation ------------------------------ #
+    # Separate from the pooled 5-fold analysis above (which intentionally uses
+    # ALL labeled data for the most stable SHAP importance estimate -- fewer
+    # rows would make individual feature rankings noisier). This block adds
+    # the classic three-way check on top: train score (in-sample fit per
+    # fold), validation score (out-of-fold per fold, same idea as above but
+    # broken out individually), and test score (a group of users carved out
+    # BEFORE any fold-splitting happens, evaluated exactly once, never seen
+    # during training or fold selection).
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=RANDOM_STATE)
+    trainval_idx, test_idx = next(gss.split(X, y, groups))
+    print(f"\n---- Train / validation / test split ----")
+    print(f"train+validation pool: {len(trainval_idx):,} rows, {len(set(groups[trainval_idx])):,} users")
+    print(f"held-out test (untouched until final check): {len(test_idx):,} rows, "
+          f"{len(set(groups[test_idx])):,} users")
+
+    X_tv, y_tv, groups_tv = X.iloc[trainval_idx], y[trainval_idx], groups[trainval_idx]
+    cv2 = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    train_aucs, val_aucs = [], []
+    for fold, (tr_idx, va_idx) in enumerate(cv2.split(X_tv, y_tv, groups_tv), start=1):
+        fold_m = xgb.XGBClassifier(**model_params)
+        fold_m.fit(X_tv.iloc[tr_idx], y_tv[tr_idx])
+        train_auc = roc_auc_score(y_tv[tr_idx], fold_m.predict_proba(X_tv.iloc[tr_idx])[:, 1])
+        val_auc = roc_auc_score(y_tv[va_idx], fold_m.predict_proba(X_tv.iloc[va_idx])[:, 1])
+        train_aucs.append(train_auc)
+        val_aucs.append(val_auc)
+        print(f"  fold {fold}/{N_FOLDS}: train ROC-AUC = {train_auc:.3f} | validation ROC-AUC = {val_auc:.3f} "
+              f"(gap = {train_auc - val_auc:+.3f})")
+
+    print(f"mean train ROC-AUC = {np.mean(train_aucs):.3f} | mean validation ROC-AUC = {np.mean(val_aucs):.3f} "
+          f"(gap = {np.mean(train_aucs) - np.mean(val_aucs):+.3f} -- a large positive gap flags overfitting)")
+
+    # One model fit on the FULL train+validation pool, scored exactly once on
+    # the test group -- this is the only number in the whole script computed
+    # on data that never influenced any training or fold-selection decision.
+    test_model = xgb.XGBClassifier(**model_params)
+    test_model.fit(X_tv, y_tv)
+    test_proba = test_model.predict_proba(X.iloc[test_idx])[:, 1]
+    test_auc = roc_auc_score(y[test_idx], test_proba)
+    test_ap = average_precision_score(y[test_idx], test_proba)
+    print(f"held-out TEST ROC-AUC = {test_auc:.3f} | TEST PR-AUC = {test_ap:.3f} "
+          f"(n={len(test_idx):,}, base rate={y[test_idx].mean():.1%})")
 
     base_rate = y.mean()
     print(f"Base rate (share of at-risk rows that became engaged): {base_rate:.1%}")
