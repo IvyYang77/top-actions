@@ -1,60 +1,75 @@
 sub_feature,mean_abs_shap,gain,direction
-Vincent RA - Recent Conversation Opened,0.438,368.5,1.0
-Text Editor Updated,0.271,123.0,1.0
-Vincent RA - New Conversation Started,0.219,221.0,1.0
-Text Editor Opened,0.21,169.2,1.0
-Vincent RA - Document upload,0.174,58.6,1.0
-Work - Work Opened,0.158,122.9,1.0
-Matter - AI Action Viewed,0.131,38.5,-1.0
-Manage - Recent Work Conversation Opened,0.09,72.9,1.0
-Matter - AI Action Generated,0.087,35.6,1.0
-Vincent RA - Legal Authorities Tab Viewed,0.081,57.9,1.0
-Task: memo,0.081,56.9,1.0
-Workflow: others,0.063,58.8,1.0
-Work - Draft Opened,0.06,40.0,1.0
-Vincent RA - Task submission,0.051,71.7,1.0
-Task: free_form_message,0.044,52.0,1.0
-Vincent RA - Jurisdiction Selected,0.044,61.4,1.0
-Manage - Document Analyzed in Vincent,0.041,49.2,1.0
-Vincent RA - Output Saved,0.041,41.4,1.0
-Matter - AI Action Clicked,0.038,43.5,1.0
-Document Modified by AI,0.03,48.8,1.0
-Workflow: default,0.03,53.4,1.0
-Work - Library Opened,0.023,37.9,1.0
-Vincent RA - Matter Selected,0.023,29.7,1.0
-Vincent RA - Output Copied,0.02,28.5,1.0
-Vincent RA - Query Classification,0.013,34.7,1.0
-Workflow: analyze_contract,0.013,40.1,1.0
-Task: discuss,0.012,36.6,1.0
-Vincent RA - Document Downloaded,0.01,24.9,1.0
-Vincent RA - Legal Authorities Tab Closed,0.009,25.4,1.0
-Document Conversation Started,0.008,35.0,1.0
-Vincent RA - Reference Clicked,0.007,27.1,1.0
-Task: propose_defenses,0.007,25.9,-1.0
-Task: others,0.006,38.5,1.0
-Task: extract_facts,0.006,27.6,-1.0
-Workflow: research,0.006,30.3,-1.0
-Task: contract_risk_mitigations,0.004,27.4,-1.0
-Task: contract_inconsistencies_overlap,0.004,31.8,-1.0
-Workflow: build_argument,0.003,22.7,1.0
-Vincent RA - Document processed complete,0.003,23.6,-1.0
-Workflow: analyze_complaint,0.002,15.9,1.0
-Task: extract_claims,0.001,25.7,-1.0
-Analyze Button Clicked,0.001,12.2,1.0
-Workflow: build_argument_with_facts,0.001,11.3,-1.0
-Task: support_proposition,0.001,16.5,-1.0
-Workflow: tabular_review,0.001,14.3,-1.0
-Task: draft_questionnaire,0.001,25.3,1.0
-Vincent RA - Tables Template Selected,0.001,14.2,-1.0
-Vincent RA - Tables Auto Generate Selected,0.0,3.1,1.0
-Workflow: analyze_judicial_proceedings,0.0,0.0,
-Context Command Triggered,0.0,0.0,
-Matter - AI Action Dismissed,0.0,0.0,
-Auth Completed,0.0,0.0,
-Template Builder Abandoned,0.0,0.0,
-Template Builder Opened,0.0,0.0,
+Vincent RA - Recent Conversation Opened,0.419,319.9,1.0
+Text Editor Opened,0.312,343.5,1.0
+Text Editor Updated,0.285,280.0,1.0
+Vincent RA - Document upload,0.211,83.5,1.0
+Matter - AI Action Viewed,0.147,46.6,-1.0
+Vincent RA - Legal Authorities Tab Viewed,0.127,68.5,1.0
+Vincent RA - New Conversation Started,0.118,251.1,1.0
+Workflow: others,0.111,81.1,1.0
+Manage - Recent Work Conversation Opened,0.102,99.2,1.0
+Task: free_form_message,0.083,85.0,1.0
+Vincent RA - Legal Authorities Tab Closed,0.074,57.7,1.0
+Matter - AI Action Generated,0.072,36.2,1.0
+Vincent RA - Task submission,0.05,76.8,1.0
+Vincent RA - Matter Selected,0.047,35.3,1.0
+Vincent RA - Output Copied,0.042,40.6,1.0
+Work - Draft Opened,0.042,37.1,1.0
+Document Modified by AI,0.042,55.4,1.0
+Manage - Document Analyzed in Vincent,0.041,59.8,1.0
+Vincent RA - Jurisdiction Selected,0.037,53.3,1.0
+Work - Work Opened,0.035,46.7,1.0
+Vincent RA - Query Classification,0.022,62.7,1.0
+Workflow: default,0.021,66.4,1.0
+Task: memo,0.02,58.4,1.0
+Document Conversation Started,0.018,64.7,1.0
+Vincent RA - Reference Clicked,0.018,42.9,1.0
+Task: discuss,0.017,42.1,1.0
+Vincent RA - Document Downloaded,0.016,30.3,1.0
+Matter - AI Action Clicked,0.014,42.1,1.0
+Analyze Button Clicked,0.009,49.5,1.0
+Workflow: research,0.006,34.7,-1.0
+Vincent RA - Output Saved,0.006,32.3,1.0
+Vincent RA - Skill installed,0.005,42.7,1.0
+Task: others,0.004,41.4,1.0
+Work - Library Opened,0.004,35.4,-1.0
+Task: draft_questionnaire,0.003,48.3,1.0
+Workflow: analyze_contract,0.002,23.6,1.0
+Vincent RA - Skill builder created skill,0.001,28.1,1.0
+Vincent RA - Document processed complete,0.001,21.8,-1.0
+Task: propose_defenses,0.001,15.4,-1.0
+Task: extract_facts,0.001,16.1,-1.0
+Task: contract_inconsistencies_overlap,0.001,12.4,-1.0
+Auth Completed,0.0,14.7,1.0
+Template Builder Opened,0.0,10.1,1.0
+Task: contract_risk_mitigations,0.0,10.8,1.0
+Vincent RA - Skill saved,0.0,11.4,1.0
+Matter - AI Action Dismissed,0.0,11.2,1.0
+Workflow: tabular_review,0.0,7.5,-1.0
+Task: extract_claims,0.0,5.0,-1.0
+Vincent RA - Skill created,0.0,5.8,1.0
+Task: support_proposition,0.0,3.9,-1.0
+Template Saved,0.0,11.9,1.0
+Editor - Editor Error,0.0,0.0,
+Editor - Document Opened,0.0,0.0,
 Template Progress Milestone Reached,0.0,0.0,
+Context Command Triggered,0.0,0.0,
+Editor - Document Conversation Started,0.0,0.0,
+Workflow: build_argument_with_facts,0.0,0.0,
+Workflow: build_argument,0.0,0.0,
+Workflow: analyze_judicial_proceedings,0.0,0.0,
 Template Save Failed,0.0,0.0,
-Template Saved,0.0,0.0,
+Workflow: analyze_complaint,0.0,0.0,
+Editor - Document Modified by AI,0.0,0.0,
+Editor - Document Saved,0.0,0.0,
+Editor - New Document Created,0.0,0.0,
+Vincent RA - Tables Template Selected,0.0,0.0,
 Vincent RA - Tables Empty Table Selected,0.0,0.0,
+Vincent RA - Tables Auto Generate Selected,0.0,0.0,
+Vincent RA - Subskill deleted,0.0,0.0,
+Vincent RA - Subskill created,0.0,0.0,
+Vincent RA - Skill uninstalled,0.0,0.0,
+Editor - Vincent Panel Toggled,0.0,0.0,
+Vincent RA - Skill deleted,0.0,0.0,
 Template Builder Error,0.0,0.0,
+Template Builder Abandoned,0.0,0.0,

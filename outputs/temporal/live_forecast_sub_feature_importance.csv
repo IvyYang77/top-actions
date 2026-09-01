@@ -1,60 +1,75 @@
 sub_feature,mean_abs_shap
-Vincent RA - Recent Conversation Opened,0.428
-Text Editor Updated,0.24
-Text Editor Opened,0.221
-Vincent RA - New Conversation Started,0.208
-Vincent RA - Document upload,0.167
-Work - Work Opened,0.147
-Matter - AI Action Viewed,0.129
+Vincent RA - Recent Conversation Opened,0.416
+Text Editor Opened,0.34
+Text Editor Updated,0.244
+Vincent RA - Document upload,0.189
+Vincent RA - Legal Authorities Tab Viewed,0.15
+Vincent RA - New Conversation Started,0.143
+Matter - AI Action Viewed,0.14
 Manage - Recent Work Conversation Opened,0.102
-Matter - AI Action Generated,0.088
-Vincent RA - Legal Authorities Tab Viewed,0.078
-Vincent RA - Task submission,0.069
-Task: memo,0.066
-Work - Draft Opened,0.06
-Workflow: others,0.051
-Vincent RA - Jurisdiction Selected,0.048
-Manage - Document Analyzed in Vincent,0.048
-Vincent RA - Output Saved,0.044
-Document Modified by AI,0.041
-Task: free_form_message,0.04
-Matter - AI Action Clicked,0.035
-Vincent RA - Output Copied,0.021
-Workflow: default,0.016
-Vincent RA - Matter Selected,0.015
-Work - Library Opened,0.013
-Vincent RA - Reference Clicked,0.011
-Vincent RA - Document Downloaded,0.008
-Workflow: analyze_contract,0.008
-Vincent RA - Query Classification,0.007
-Vincent RA - Legal Authorities Tab Closed,0.007
-Task: others,0.007
-Task: discuss,0.005
-Workflow: research,0.004
-Task: propose_defenses,0.004
-Document Conversation Started,0.004
-Task: contract_risk_mitigations,0.004
-Vincent RA - Document processed complete,0.003
-Vincent RA - Tables Template Selected,0.003
-Workflow: build_argument,0.003
-Task: extract_facts,0.002
-Task: contract_inconsistencies_overlap,0.002
-Analyze Button Clicked,0.002
-Task: support_proposition,0.001
-Task: extract_claims,0.001
+Workflow: others,0.094
+Matter - AI Action Generated,0.075
+Vincent RA - Legal Authorities Tab Closed,0.069
+Task: free_form_message,0.066
+Vincent RA - Task submission,0.059
+Document Modified by AI,0.053
+Vincent RA - Matter Selected,0.05
+Work - Draft Opened,0.043
+Manage - Document Analyzed in Vincent,0.042
+Vincent RA - Output Copied,0.037
+Work - Work Opened,0.031
+Workflow: default,0.03
+Vincent RA - Query Classification,0.026
+Vincent RA - Reference Clicked,0.021
+Vincent RA - Jurisdiction Selected,0.017
+Vincent RA - Document Downloaded,0.017
+Document Conversation Started,0.015
+Matter - AI Action Clicked,0.014
+Task: discuss,0.01
+Vincent RA - Skill installed,0.009
+Analyze Button Clicked,0.009
+Task: memo,0.006
+Workflow: research,0.006
+Vincent RA - Output Saved,0.004
+Task: others,0.003
+Task: contract_risk_mitigations,0.002
+Work - Library Opened,0.002
 Task: draft_questionnaire,0.001
-Workflow: analyze_complaint,0.0
-Workflow: build_argument_with_facts,0.0
-Template Saved,0.0
-Context Command Triggered,0.0
-Matter - AI Action Dismissed,0.0
-Workflow: analyze_judicial_proceedings,0.0
+Vincent RA - Skill builder created skill,0.001
+Vincent RA - Tables Template Selected,0.0
+Vincent RA - Skill deleted,0.0
 Auth Completed,0.0
-Template Builder Abandoned,0.0
-Template Builder Error,0.0
 Template Builder Opened,0.0
+Matter - AI Action Dismissed,0.0
+Editor - Document Opened,0.0
+Editor - Document Saved,0.0
+Vincent RA - Tables Empty Table Selected,0.0
+Template Builder Abandoned,0.0
+Workflow: analyze_complaint,0.0
+Editor - Document Modified by AI,0.0
+Vincent RA - Subskill deleted,0.0
+Workflow: analyze_contract,0.0
+Workflow: analyze_judicial_proceedings,0.0
+Workflow: build_argument,0.0
+Workflow: build_argument_with_facts,0.0
+Editor - Document Conversation Started,0.0
+Context Command Triggered,0.0
+Vincent RA - Tables Auto Generate Selected,0.0
+Vincent RA - Skill created,0.0
+Vincent RA - Subskill created,0.0
+Task: extract_facts,0.0
 Template Progress Milestone Reached,0.0
 Template Save Failed,0.0
-Vincent RA - Tables Empty Table Selected,0.0
-Vincent RA - Tables Auto Generate Selected,0.0
+Template Saved,0.0
+Task: support_proposition,0.0
+Task: propose_defenses,0.0
+Vincent RA - Document processed complete,0.0
+Task: extract_claims,0.0
+Vincent RA - Skill uninstalled,0.0
+Task: contract_inconsistencies_overlap,0.0
+Editor - Vincent Panel Toggled,0.0
+Editor - New Document Created,0.0
+Template Builder Error,0.0
+Editor - Editor Error,0.0
+Vincent RA - Skill saved,0.0
 Workflow: tabular_review,0.0

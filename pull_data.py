@@ -36,14 +36,18 @@ WINDOW_DAYS = 30
 # persona pipeline (data_insights_prod.dev_ivy_yang.clio_work_daily_category_versions),
 # with WINDOW=30 confirmed directly from source code (both 0C/1C notebooks),
 # not empirically estimated. That means a persona reading on any day within
-# (T, T+30] looks back at most 30 days -- so a label read starting at T+31
-# (persona lookback [T+2, T+31]) cannot reach back into the feature window
-# [T-29, T]. OUTCOME_BUFFER_DAYS is set to exactly that minimum (30) plus a
-# 1-day margin, not the old 105 -- the old value was calibrated for the prior
+# (T, T+30] looks back at most 30 days -- so a label read starting at T+30
+# (persona lookback [T+1, T+30]) cannot reach back into the feature window
+# [T-29, T]: the lookback starts the day immediately after the feature window
+# ends, with zero slack. OUTCOME_BUFFER_DAYS=29 (check day T+30) is exactly
+# that tightest leak-safe minimum -- previously set to 30 (check day T+31,
+# one extra day of margin beyond the minimum); tightened to keep monthly
+# check days landing on/near calendar month-end for months with 30-day
+# spans. Not the old 105 -- that value was calibrated for the prior
 # 90-103-day-estimated production table (models_prod.dbt.
 # int_clio_work_user_category_scores_history) and would waste ~75 days of
 # buffer per snapshot for no reason against this table.
-OUTCOME_BUFFER_DAYS = 30
+OUTCOME_BUFFER_DAYS = 29
 OUT_FILE = DATA_DIR / "feature_usage_early.parquet"
 META_FILE = DATA_DIR / "temporal_metadata.json"
 

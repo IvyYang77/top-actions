@@ -60,8 +60,11 @@ personas_history.parquet now comes from the WINDOW=30 rebuild of the persona
 pipeline (dev_ivy_yang.clio_work_daily_category), with WINDOW=30 confirmed
 from source, not estimated. A persona reading at day D looks back over
 [D-29, D]; to not overlap the feature window [T-29, T], D must be >= T+30.
-OUTCOME_BUFFER_DAYS=30 sets the check day to T+31 -- the earliest safe point,
-plus a 1-day margin. A valid snapshot now needs only OUTCOME_BUFFER_DAYS+1
+OUTCOME_BUFFER_DAYS=29 sets the check day to T+30 -- the tightest leak-safe
+point (D=T+30 gives persona lookback [T+1, T+30], starting immediately
+after the feature window ends, with zero slack). Previously 30 (check day
+T+31, one extra day of margin); tightened so monthly check days land on/
+near calendar month-end. A valid snapshot now needs only OUTCOME_BUFFER_DAYS+1
 days of runway after T (not OUTCOME_BUFFER_DAYS+WINDOW_DAYS, since there's
 no separate multi-day outcome span to also fit before data_max_date).
 
@@ -117,7 +120,7 @@ EXCLUDE_FEATURES = {"Work - Work Opened (Excludes App Switcher)"}
 # pull_data.py -- both must agree or the two scripts' snapshot eligibility
 # and label timing will silently disagree.
 WINDOW_DAYS = 30
-OUTCOME_BUFFER_DAYS = 30  # check day T+31: earliest day whose own 30d rolling lookback clears [T-29, T]
+OUTCOME_BUFFER_DAYS = 29  # check day T+30: tightest day whose own 30d rolling lookback clears [T-29, T]
 FEATURE_FILE = DATA_DIR / "feature_usage_early.parquet"
 OUT_DIR = Path(__file__).resolve().parent / "outputs" / "temporal"
 # Cohort filter: analyze only users who JOINED (first persona snapshot) on/after
